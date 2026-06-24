@@ -5,21 +5,8 @@ import requests
 from datetime import datetime, timezone
 from .api_gateway import GitHubClient
 from . import config
-from . import database as db
 
 log = logging.getLogger("localowl.commenter")
-
-
-def _parse_verdict(text: str) -> str:
-    marker = "## ✅ Verdict"
-    section = text.split(marker, 1)[-1] if marker in text else text
-    if "❌" in section:
-        return "changes"
-    if "⚠️" in section:
-        return "suggestions"
-    if "✅" in section:
-        return "approve"
-    return "unknown"
 
 
 class PRCommenter:
@@ -35,11 +22,6 @@ class PRCommenter:
         if comment_id is None:
             log.error("Failed to post comment on %s PR #%d", repo_name, pr_number)
             return False
-
-        verdict = _parse_verdict(review_text)
-        pr_url  = f"https://github.com/{repo_name}/pull/{pr_number}"
-        now     = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        db.save_review(repo_name, pr_number, pr_title, pr_url, verdict, comment_id, now)
         self._ping_stats()
         return True
 
