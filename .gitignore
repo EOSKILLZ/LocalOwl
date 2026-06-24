@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# Environment & secrets
+.env
+.env.local
+*.pem
+
+# Runtime state
+localowl.log
+.processed_prs.json
+*.tmp
+
+# Editor / OS
+.DS_Store
+.claude/settings.local.json
