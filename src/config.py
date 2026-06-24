@@ -104,7 +104,7 @@ def validate_config(logger: logging.Logger) -> bool:
             "or GITHUB_APP_ID + GITHUB_APP_PRIVATE_KEY_PATH for a GitHub App."
         )
         ok = False
-    if not GITHUB_REPOS:
+    if not GITHUB_REPOS and not WEBHOOK_SECRET:
         logger.error("GITHUB_REPO is not set — no repositories to monitor")
         ok = False
     if not LM_STUDIO_BASE_URL:
