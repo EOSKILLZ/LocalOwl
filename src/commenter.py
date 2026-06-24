@@ -1,4 +1,3 @@
-"""Posts formatted review comments to GitHub PRs."""
 import logging
 from datetime import datetime, timezone
 from .api_gateway import GitHubClient
@@ -7,8 +6,6 @@ log = logging.getLogger("localowl.commenter")
 
 
 class PRCommenter:
-    """Posts LocalOwl review comments on GitHub pull requests."""
-
     def __init__(self, github_client: GitHubClient = None):
         self.github = github_client or GitHubClient()
 
@@ -22,13 +19,8 @@ class PRCommenter:
 
     def _format_comment(self, review_text: str) -> str:
         review_text = (review_text or "").strip()
-        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-
-        if not review_text or review_text.lower() in ("none", "n/a"):
-            body = "> No issues found — looks good! ✅"
-        else:
-            body = review_text
-
+        timestamp   = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        body        = "> No issues found — looks good! ✅" if not review_text or review_text.lower() in ("none", "n/a") else review_text
         return (
             "## 🦉 LocalOwl Review\n\n"
             f"{body}\n\n"
