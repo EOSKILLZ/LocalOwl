@@ -66,6 +66,8 @@ def _load_app_private_key() -> str:
 
 GITHUB_APP_PRIVATE_KEY = _load_app_private_key()
 
+STATS_URL = os.getenv("STATS_URL", "")
+
 POLL_INTERVAL  = int(os.getenv("POLL_INTERVAL", "300"))
 STATE_FILE     = os.getenv("STATE_FILE", ".processed_prs.json")
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")

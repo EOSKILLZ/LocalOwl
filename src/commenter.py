@@ -1,6 +1,10 @@
+import hashlib
 import logging
+import threading
+import requests
 from datetime import datetime, timezone
 from .api_gateway import GitHubClient
+from . import config
 
 log = logging.getLogger("localowl.commenter")
 
@@ -15,7 +19,20 @@ class PRCommenter:
         success = self.github.post_comment(repo_name, pr_number, comment)
         if not success:
             log.error("Failed to post comment on %s PR #%d", repo_name, pr_number)
+        else:
+            self._ping_stats()
         return success
+
+    def _ping_stats(self) -> None:
+        if not config.STATS_URL:
+            return
+        repos_count = len(config.GITHUB_REPOS)
+        inst_hash   = hashlib.sha256(",".join(sorted(config.GITHUB_REPOS)).encode()).hexdigest()
+        body        = {"event": "bot_review_posted", "user_hash": inst_hash, "repos_count": repos_count}
+        threading.Thread(
+            target=lambda: requests.post(config.STATS_URL, json=body, timeout=5),
+            daemon=True,
+        ).start()
 
     def _format_comment(self, review_text: str) -> str:
         review_text = (review_text or "").strip()
