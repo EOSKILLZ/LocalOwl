@@ -1,13 +1,15 @@
 import sys
+import threading
 from src.config import (
     setup_logging, validate_config,
     GITHUB_REPOS, POLL_INTERVAL, SKIP_DRAFT_PRS,
-    WEBHOOK_SECRET, WEBHOOK_PORT,
+    WEBHOOK_SECRET, WEBHOOK_PORT, SERVER_PORT,
 )
 from src.api_gateway import GitHubClient
 from src.pr_monitor import PullRequestMonitor
 from src.review_engine import ReviewEngine
 from src.commenter import PRCommenter
+from src import database as db
 
 log = setup_logging()
 
@@ -15,7 +17,6 @@ log = setup_logging()
 class LocalOwl:
     def __init__(self, repo_names: list = None):
         self.repo_names = repo_names or GITHUB_REPOS
-        # single client — shared auth context, one TCP pool
         shared_gh = GitHubClient()
         self.monitor       = PullRequestMonitor(self.repo_names, github_client=shared_gh)
         self.review_engine = ReviewEngine()
@@ -35,7 +36,7 @@ class LocalOwl:
         result = self.review_engine.analyze_pr(pull_request, repo_config=repo_config)
         if result["status"] == "success":
             posted = self.commenter.post_review_comment(
-                repo, pull_request.number, result["review"]
+                repo, pull_request.number, pull_request.title, result["review"]
             )
             if posted:
                 log.info("[%s] PR #%d — review posted", repo, pull_request.number)
@@ -48,7 +49,6 @@ class LocalOwl:
         if SKIP_DRAFT_PRS and is_draft:
             log.info("[%s] Skipping draft PR #%d (webhook)", repo, pr_number)
             return
-        # idempotency guard — webhook deliveries can duplicate
         if self.monitor._state.get(repo, {}).get(str(pr_number)) == head_sha:
             log.debug("[%s] PR #%d already reviewed at %s — skipping", repo, pr_number, head_sha[:7])
             return
@@ -71,6 +71,13 @@ class LocalOwl:
         if not self.review_engine.lm.health_check():
             log.error("LM Studio is not reachable — start LM Studio and load a model, then retry")
             sys.exit(1)
+
+        db.init()
+
+        # API server in background thread
+        from src.server import start as start_server
+        threading.Thread(target=start_server, daemon=True).start()
+        log.info("API     : http://localhost:%d/api/status", SERVER_PORT)
 
         if WEBHOOK_SECRET:
             from src.webhook_server import WebhookServer

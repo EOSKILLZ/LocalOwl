@@ -149,19 +149,19 @@ class GitHubClient:
             log.error("Unexpected error fetching %s PR #%d: %s", repo_name, pr_number, e)
             return None
 
-    def post_comment(self, repo_name: str, pr_number: int, comment: str) -> bool:
+    def post_comment(self, repo_name: str, pr_number: int, comment: str) -> int | None:
         try:
             repo = self.github.get_repo(repo_name)
             pr   = repo.get_pull(pr_number)
-            pr.create_issue_comment(comment)
-            log.info("Comment posted on %s PR #%d", repo_name, pr_number)
-            return True
+            ic   = pr.create_issue_comment(comment)
+            log.info("Comment posted on %s PR #%d (id=%d)", repo_name, pr_number, ic.id)
+            return ic.id
         except GithubException as e:
             log.error("GitHub error posting on %s PR #%d: %s %s", repo_name, pr_number, e.status, e.data)
-            return False
+            return None
         except Exception as e:
             log.error("Unexpected error posting comment: %s", e)
-            return False
+            return None
 
     def get_repos_by_owner(self, owner: str) -> list[str]:
         try:

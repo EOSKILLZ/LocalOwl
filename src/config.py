@@ -66,7 +66,9 @@ def _load_app_private_key() -> str:
 
 GITHUB_APP_PRIVATE_KEY = _load_app_private_key()
 
-STATS_URL = os.getenv("STATS_URL", "")
+STATS_URL   = os.getenv("STATS_URL", "")
+SERVER_PORT = int(os.getenv("SERVER_PORT", "8080"))
+DB_PATH     = os.getenv("DB_PATH", "localowl.db")
 
 POLL_INTERVAL  = int(os.getenv("POLL_INTERVAL", "300"))
 STATE_FILE     = os.getenv("STATE_FILE", ".processed_prs.json")
