@@ -24,16 +24,14 @@ class LocalOwl:
 
     def process_pull_request(self, repo: str, pull_request):
         log.info("[%s] Processing PR #%d: %s", repo, pull_request.number, pull_request.title)
-        repo_config = self.monitor.github.get_repo_config(repo)
-        if repo_config:
-            log.info(
-                "[%s] .localowl.yml: tone=%s style=%s focus=%s",
-                repo,
-                repo_config.get("tone", "balanced"),
-                repo_config.get("style", "detailed"),
-                ",".join(repo_config.get("focus") or []) or "all",
-            )
-        result = self.review_engine.analyze_pr(pull_request, repo_config=repo_config)
+        global_cfg = db.get_settings()                           # from dashboard
+        repo_cfg   = self.monitor.github.get_repo_config(repo)  # .localowl.yml overrides
+        merged     = {**global_cfg, **(repo_cfg or {})} or None
+        if merged:
+            src = "repo+global" if (repo_cfg and global_cfg) else ("repo" if repo_cfg else "global")
+            log.info("[%s] Config (%s): tone=%s style=%s", repo, src,
+                     merged.get("tone", "balanced"), merged.get("style", "detailed"))
+        result = self.review_engine.analyze_pr(pull_request, repo_config=merged)
         if result["status"] == "success":
             posted = self.commenter.post_review_comment(
                 repo, pull_request.number, pull_request.title, result["review"]
@@ -81,13 +79,20 @@ class LocalOwl:
 
         if WEBHOOK_SECRET:
             from src.webhook_server import WebhookServer
-            log.info("Mode    : webhook (port %d)", WEBHOOK_PORT)
-            log.info("Repos   : any repo that sends events to this server")
+            # Polling runs in background; webhook server blocks main thread
+            threading.Thread(
+                target=self.monitor.start_monitoring,
+                args=(self.process_pull_request,),
+                daemon=True,
+            ).start()
+            log.info("Mode    : webhook (port %d) + polling every %ds", WEBHOOK_PORT, POLL_INTERVAL)
+            log.info("Webhook : https://<your-domain>/webhook")
+            log.info("Repos   : %s", ", ".join(self.repo_names))
             server = WebhookServer(WEBHOOK_PORT, WEBHOOK_SECRET, self.handle_webhook_pr)
             try:
                 server.serve_forever()
             except KeyboardInterrupt:
-                log.info("Webhook server stopped")
+                log.info("Stopped")
         else:
             log.info("Mode    : polling (every %ds)", POLL_INTERVAL)
             log.info("Repos   : %s", ", ".join(self.repo_names))

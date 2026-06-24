@@ -1,3 +1,4 @@
+import json
 import sqlite3
 import logging
 from pathlib import Path
@@ -93,17 +94,26 @@ def count_reviews(verdict: str | None = None, repo: str | None = None) -> int:
         return conn.execute(f"SELECT COUNT(*) FROM reviews {where}", params).fetchone()[0]
 
 
+_SETTINGS_KEY = "ai_settings"
+
+
 def get_settings() -> dict:
     with _connect() as conn:
-        rows = conn.execute("SELECT key, value FROM settings").fetchall()
-    return {r["key"]: r["value"] for r in rows}
+        row = conn.execute(
+            "SELECT value FROM settings WHERE key = ?", (_SETTINGS_KEY,)
+        ).fetchone()
+    if not row:
+        return {}
+    try:
+        return json.loads(row["value"])
+    except Exception:
+        return {}
 
 
 def save_settings(settings: dict) -> None:
     with _connect() as conn:
-        for key, value in settings.items():
-            conn.execute(
-                """INSERT INTO settings (key, value) VALUES (?, ?)
-                   ON CONFLICT(key) DO UPDATE SET value = excluded.value""",
-                (key, str(value) if value is not None else ""),
-            )
+        conn.execute(
+            """INSERT INTO settings (key, value) VALUES (?, ?)
+               ON CONFLICT(key) DO UPDATE SET value = excluded.value""",
+            (_SETTINGS_KEY, json.dumps(settings)),
+        )
