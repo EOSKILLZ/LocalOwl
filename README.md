@@ -49,13 +49,21 @@ Anything running in LM Studio works. Recommendations:
 | IBM Granite 4 Tiny | 3 GB | 128K |
 | Mistral 7B | 5 GB | 32K |
 
+## Modes
+
+**Polling** (default, recommended for self-hosting) — LocalOwl checks your repos on a timer. No open ports, no server setup. Set `POLL_INTERVAL` in `.env` (default 300s).
+
+**Webhook** — GitHub pushes PR events to LocalOwl the instant they happen, so reviews post in seconds rather than minutes. Requires a publicly reachable server. Set `WEBHOOK_SECRET` and `WEBHOOK_PORT` in `.env`, then point your GitHub App's webhook URL to `http://your-server:8090/webhook`.
+
 ## Config
 
 All options are in `.env.example`. The main ones:
 
 | Variable | Default | What it does |
 |---|---|---|
-| `POLL_INTERVAL` | `300` | Seconds between checks |
+| `POLL_INTERVAL` | `300` | Seconds between checks (polling mode) |
+| `WEBHOOK_SECRET` | — | Enables webhook mode when set |
+| `WEBHOOK_PORT` | `8090` | Port the webhook server listens on |
 | `SKIP_DRAFT_PRS` | `true` | Ignore draft PRs |
 | `RECHECK_UPDATED_PRS` | `true` | Re-review on new commits |
 | `MAX_DIFF_CHARS` | `30000` | Max diff size sent to the model |

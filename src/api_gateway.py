@@ -176,6 +176,16 @@ class GitHubClient:
             log.error("Unexpected error fetching PRs from %s: %s", repo_name, e)
             return []
 
+    def get_pull_request(self, repo_name: str, pr_number: int):
+        try:
+            return self.github.get_repo(repo_name).get_pull(pr_number)
+        except GithubException as e:
+            log.error("GitHub error fetching %s PR #%d: %s %s", repo_name, pr_number, e.status, e.data)
+            return None
+        except Exception as e:
+            log.error("Unexpected error fetching %s PR #%d: %s", repo_name, pr_number, e)
+            return None
+
     def post_comment(self, repo_name: str, pr_number: int, comment: str) -> bool:
         try:
             repo = self.github.get_repo(repo_name)

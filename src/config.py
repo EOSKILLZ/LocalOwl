@@ -78,8 +78,10 @@ GITHUB_APP_PRIVATE_KEY = _load_app_private_key()
 
 # ── Service ───────────────────────────────────────────────────────────────────
 
-POLL_INTERVAL  = int(os.getenv("POLL_INTERVAL", "300"))
-STATE_FILE     = os.getenv("STATE_FILE", ".processed_prs.json")
+POLL_INTERVAL    = int(os.getenv("POLL_INTERVAL", "300"))
+STATE_FILE       = os.getenv("STATE_FILE", ".processed_prs.json")
+WEBHOOK_SECRET   = os.getenv("WEBHOOK_SECRET", "")
+WEBHOOK_PORT     = int(os.getenv("WEBHOOK_PORT", "8090"))
 
 # Skip pull requests that are still marked as draft
 SKIP_DRAFT_PRS = os.getenv("SKIP_DRAFT_PRS", "true").lower() == "true"
