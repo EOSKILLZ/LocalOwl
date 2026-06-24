@@ -1,6 +1,7 @@
 import logging
 import time
 import requests
+import yaml
 from github import Github, GithubException, GithubIntegration, Auth
 from .config import (
     LM_STUDIO_BASE_URL, LM_STUDIO_API_KEY, LM_STUDIO_MODEL,
@@ -171,6 +172,21 @@ class GitHubClient:
         except Exception as e:
             log.error("Could not list repos for owner %s: %s", owner, e)
             return []
+
+    def get_repo_config(self, repo_name: str) -> dict | None:
+        try:
+            repo = self.github.get_repo(repo_name)
+            f    = repo.get_contents(".localowl.yml")
+            cfg  = yaml.safe_load(f.decoded_content.decode()) or {}
+            log.debug("[%s] Loaded .localowl.yml", repo_name)
+            return cfg
+        except GithubException as e:
+            if e.status != 404:
+                log.debug("[%s] Could not fetch .localowl.yml: %s", repo_name, e)
+            return None
+        except Exception as e:
+            log.debug("[%s] Could not parse .localowl.yml: %s", repo_name, e)
+            return None
 
     def log_rate_limit(self):
         try:

@@ -23,7 +23,16 @@ class LocalOwl:
 
     def process_pull_request(self, repo: str, pull_request):
         log.info("[%s] Processing PR #%d: %s", repo, pull_request.number, pull_request.title)
-        result = self.review_engine.analyze_pr(pull_request)
+        repo_config = self.monitor.github.get_repo_config(repo)
+        if repo_config:
+            log.info(
+                "[%s] .localowl.yml: tone=%s style=%s focus=%s",
+                repo,
+                repo_config.get("tone", "balanced"),
+                repo_config.get("style", "detailed"),
+                ",".join(repo_config.get("focus") or []) or "all",
+            )
+        result = self.review_engine.analyze_pr(pull_request, repo_config=repo_config)
         if result["status"] == "success":
             posted = self.commenter.post_review_comment(
                 repo, pull_request.number, result["review"]

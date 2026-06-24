@@ -7,18 +7,18 @@ from .config import (
 
 log = logging.getLogger("localowl.review")
 
-_SYSTEM_PROMPT = """\
-You are a senior software engineer conducting a thorough pull request review. \
-Analyse the diff carefully and produce a structured report. \
-Do NOT repeat lines from the diff verbatim. Do NOT invent issues not visible in the diff. \
-Be specific — name the file and line number when calling something out. \
-For short or trivial changes, keep each section brief — one sentence is enough \
-when there is nothing substantive to say.
+_ALL_FOCUS = frozenset({"bugs", "security", "performance", "code-quality", "test-coverage", "docs"})
 
-Use exactly this structure:
+_FOCUS_LABELS = {
+    "bugs":          "Bugs & Logic Errors",
+    "security":      "Security",
+    "performance":   "Performance",
+    "code-quality":  "Code Quality",
+    "test-coverage": "test coverage",
+    "docs":          "documentation",
+}
 
----
-
+_SECTIONS = """\
 ## 📋 Overview
 2–3 sentences: what does this PR do, and what is the likely motivation?
 
@@ -56,24 +56,78 @@ If none, write: _No code quality concerns._
 Choose exactly one and justify in one sentence:
 - ✅ **Approve** — ready to merge
 - ⚠️ **Approve with suggestions** — safe to merge, suggestions are non-blocking
-- ❌ **Request changes** — must fix the listed issues before merging
+- ❌ **Request changes** — must fix the listed issues before merging"""
 
----"""
+
+def _build_system_prompt(config: dict | None = None) -> str:
+    cfg    = config or {}
+    tone   = cfg.get("tone", "balanced")
+    style  = cfg.get("style", "detailed")
+    focus  = set(cfg.get("focus") or list(_ALL_FOCUS))
+    custom = (cfg.get("custom_instructions") or "").strip()
+
+    parts = [
+        "You are a senior software engineer conducting a thorough pull request review. "
+        "Analyse the diff carefully and produce a structured report. "
+        "Do NOT repeat lines from the diff verbatim. Do NOT invent issues not visible in the diff. "
+        "Be specific — name the file and line number when calling something out. "
+        "For short or trivial changes, keep each section brief — one sentence is enough "
+        "when there is nothing substantive to say."
+    ]
+
+    if tone == "strict":
+        parts.append("Be strict and thorough — flag any potential issue, even if minor.")
+    elif tone == "lenient":
+        parts.append("Focus on significant issues only. Skip style nitpicks and minor conventions.")
+
+    if style == "concise":
+        parts.append(
+            "Be concise — keep each section to 1–3 lines. "
+            "Omit detail when nothing substantive applies."
+        )
+
+    active_focus = _ALL_FOCUS & focus
+    if active_focus and active_focus != _ALL_FOCUS:
+        labels = ", ".join(
+            _FOCUS_LABELS[k] for k in sorted(active_focus) if k in _FOCUS_LABELS
+        )
+        parts.append(
+            f"Focus your analysis especially on: {labels}. "
+            "Still include all sections but keep unfocused areas brief."
+        )
+
+    prompt = " ".join(parts) + "\n\nUse exactly this structure:\n\n---\n\n" + _SECTIONS
+
+    if custom:
+        prompt += f"\n\n**Additional instructions from the repo owner:** {custom}"
+
+    return prompt + "\n\n---"
+
+
+def _extra_ignore_patterns(config: dict | None) -> list[str]:
+    if not config:
+        return []
+    raw = config.get("ignore_patterns") or ""
+    if isinstance(raw, list):
+        return [p.strip() for p in raw if str(p).strip()]
+    return [p.strip() for p in str(raw).split(",") if p.strip()]
 
 
 class ReviewEngine:
     def __init__(self, lm_client: LMStudioClient = None):
         self.lm = lm_client or LMStudioClient()
 
-    def analyze_pr(self, pull_request) -> dict:
+    def analyze_pr(self, pull_request, repo_config: dict | None = None) -> dict:
         pr_number = pull_request.number
-        pr_title = pull_request.title
+        pr_title  = pull_request.title
         log.info("Analysing PR #%d: %s", pr_number, pr_title)
 
         try:
-            diff, truncated = self._extract_diff(pull_request)
-            meta = self._collect_meta(pull_request)
-            review = self._generate_review(pr_title, pull_request.body or "", diff, truncated, meta)
+            extra    = _extra_ignore_patterns(repo_config)
+            diff, truncated = self._extract_diff(pull_request, extra_patterns=extra)
+            meta     = self._collect_meta(pull_request)
+            prompt   = _build_system_prompt(repo_config)
+            review   = self._generate_review(pr_title, pull_request.body or "", diff, truncated, meta, prompt)
 
             if not review:
                 log.warning("PR #%d: LM Studio returned an empty review", pr_number)
@@ -82,9 +136,9 @@ class ReviewEngine:
             log.info("PR #%d: review generated (%d chars)", pr_number, len(review))
             return {
                 "pr_number": pr_number,
-                "pr_title": pr_title,
-                "review": review,
-                "status": "success",
+                "pr_title":  pr_title,
+                "review":    review,
+                "status":    "success",
                 "truncated": truncated,
             }
 
@@ -94,15 +148,16 @@ class ReviewEngine:
 
     # ── internals ─────────────────────────────────────────────────────────────
 
-    def _generate_review(self, title: str, body: str, diff: str, truncated: bool, meta: dict) -> str:
+    def _generate_review(
+        self, title: str, body: str, diff: str, truncated: bool, meta: dict, system_prompt: str
+    ) -> str:
         user_msg = self._build_user_message(title, body, diff, truncated, meta)
         log.debug("Sending %d chars to LM Studio", len(user_msg))
-        return self.lm.chat(_SYSTEM_PROMPT, user_msg)
+        return self.lm.chat(system_prompt, user_msg)
 
     def _build_user_message(self, title: str, body: str, diff: str, truncated: bool, meta: dict) -> str:
         parts = [f"# PR #{meta['number']}: {title}"]
 
-        # Metadata block gives the model useful context
         meta_lines = [
             f"- **Author:** {meta['author']}",
             f"- **Base → Head:** `{meta['base']}` → `{meta['head']}`",
@@ -147,23 +202,24 @@ class ReviewEngine:
                 "labels": [],
             }
 
-    def _extract_diff(self, pull_request) -> tuple[str, bool]:
+    def _extract_diff(self, pull_request, extra_patterns: list[str] | None = None) -> tuple[str, bool]:
+        all_patterns = list(IGNORE_FILE_PATTERNS) + (extra_patterns or [])
         try:
             all_files = list(pull_request.get_files())
             log.debug("PR #%d has %d changed file(s)", pull_request.number, len(all_files))
 
-            reviewable = [f for f in all_files if not self._should_ignore(f.filename)]
-            skipped = len(all_files) - len(reviewable)
+            reviewable = [f for f in all_files if not _should_ignore(f.filename, all_patterns)]
+            skipped    = len(all_files) - len(reviewable)
             if skipped:
                 log.debug("Skipped %d file(s) matching ignore patterns", skipped)
 
-            sections = []
+            sections    = []
             total_chars = 0
-            truncated = False
+            truncated   = False
 
             for f in reviewable[:MAX_FILES_IN_DIFF]:
                 header = f"### {f.filename} (+{f.additions}/-{f.deletions})"
-                patch = (f.patch or "").strip()
+                patch  = (f.patch or "").strip()
                 if patch:
                     lines = patch.splitlines()
                     if len(lines) > MAX_LINES_PER_FILE:
@@ -181,9 +237,7 @@ class ReviewEngine:
 
             if len(reviewable) > MAX_FILES_IN_DIFF:
                 truncated = True
-                sections.append(
-                    f"… ({len(reviewable) - MAX_FILES_IN_DIFF} more files not shown)"
-                )
+                sections.append(f"… ({len(reviewable) - MAX_FILES_IN_DIFF} more files not shown)")
 
             result = "\n\n".join(sections)
             log.debug(
@@ -197,15 +251,15 @@ class ReviewEngine:
             return "", False
 
     @staticmethod
-    def _should_ignore(filename: str) -> bool:
-        return any(fnmatch.fnmatch(filename, pattern) for pattern in IGNORE_FILE_PATTERNS)
-
-    @staticmethod
     def _error_result(pr_number: int, pr_title: str, reason: str) -> dict:
         return {
             "pr_number": pr_number,
-            "pr_title": pr_title,
-            "review": f"Review failed: {reason}",
-            "status": "error",
+            "pr_title":  pr_title,
+            "review":    f"Review failed: {reason}",
+            "status":    "error",
             "truncated": False,
         }
+
+
+def _should_ignore(filename: str, patterns: list[str]) -> bool:
+    return any(fnmatch.fnmatch(filename, p) for p in patterns)
