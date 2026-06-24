@@ -1,4 +1,3 @@
-"""Polls GitHub repos for new/updated PRs and fires a callback for each."""
 import json
 import logging
 import os
@@ -9,31 +8,24 @@ from .config import GITHUB_REPOS, POLL_INTERVAL, STATE_FILE, SKIP_DRAFT_PRS, REC
 
 log = logging.getLogger("localowl.monitor")
 
-# Sentinel stored in state for PRs reviewed before SHA-tracking was added.
-# These are treated as "already reviewed, don't re-review" until a new commit lands.
+# sentinel for pre-SHA-tracking state entries — treated as unreviewed on next push
 _LEGACY_SHA = ""
 
 
 class PullRequestMonitor:
-    """Monitors GitHub repos for new and updated pull requests."""
-
     def __init__(
         self,
         repo_names: list = None,
         poll_interval: int = POLL_INTERVAL,
         github_client: GitHubClient = None,
     ):
-        self.repo_names = repo_names or GITHUB_REPOS
+        self.repo_names    = repo_names or GITHUB_REPOS
         self.poll_interval = poll_interval
-        self.github = github_client or GitHubClient()
-        self._state_path = Path(STATE_FILE)
-        # state shape: {repo: {str(pr_number): head_sha}}
+        self.github        = github_client or GitHubClient()
+        self._state_path   = Path(STATE_FILE)
         self._state: dict[str, dict[str, str]] = self._load_state()
 
-    # ── public ────────────────────────────────────────────────────────────────
-
     def start_monitoring(self, callback):
-        """Poll indefinitely; call callback(repo, pr) for each actionable PR."""
         repos = self._resolve_repos()
         if not repos:
             log.error("No repositories to monitor — set GITHUB_REPO in .env")
@@ -75,11 +67,8 @@ class PullRequestMonitor:
         except KeyboardInterrupt:
             log.info("Monitoring stopped by user")
 
-    # ── internals ─────────────────────────────────────────────────────────────
-
     def _get_actionable_prs(self, repo: str) -> list[tuple]:
-        """Return list of (pr, reason_str) for PRs that need a review."""
-        prs = self.github.get_pull_requests(repo, state="open")
+        prs        = self.github.get_pull_requests(repo, state="open")
         repo_state = self._state.get(repo, {})
         actionable = []
 
@@ -88,7 +77,7 @@ class PullRequestMonitor:
                 log.debug("[%s] Skipping draft PR #%d", repo, pr.number)
                 continue
 
-            key = str(pr.number)
+            key        = str(pr.number)
             stored_sha = repo_state.get(key)
 
             if stored_sha is None:
@@ -105,7 +94,7 @@ class PullRequestMonitor:
         resolved = []
         for pattern in self.repo_names:
             if "*" in pattern:
-                owner = pattern.split("/")[0]
+                owner    = pattern.split("/")[0]
                 expanded = self.github.get_repos_by_owner(owner)
                 resolved.extend(expanded)
                 for r in expanded:
@@ -115,20 +104,16 @@ class PullRequestMonitor:
                 self._state.setdefault(pattern, {})
         return resolved
 
-    # ── state persistence ─────────────────────────────────────────────────────
-
     def _load_state(self) -> dict[str, dict[str, str]]:
         if not self._state_path.exists():
-            log.debug("No state file — starting fresh")
             return {}
         try:
-            raw = json.loads(self._state_path.read_text())
+            raw   = json.loads(self._state_path.read_text())
             state: dict[str, dict[str, str]] = {}
             for repo, value in raw.items():
                 if isinstance(value, list):
-                    # Migrate old format (list of ints) → new format (dict of sha strings)
+                    # migrate list-of-ints → sha-keyed dict
                     state[repo] = {str(n): _LEGACY_SHA for n in value}
-                    log.debug("Migrated old state for %s (%d PRs)", repo, len(value))
                 else:
                     state[repo] = value
             total = sum(len(v) for v in state.values())
@@ -139,12 +124,11 @@ class PullRequestMonitor:
             return {}
 
     def _save_state(self):
-        """Write atomically: write to a temp file then rename, so a crash can't corrupt state."""
+        # write-then-rename for atomicity — crash-safe on POSIX
         tmp = self._state_path.with_suffix(".tmp")
         try:
             tmp.write_text(json.dumps(self._state, indent=2))
-            os.replace(tmp, self._state_path)  # atomic on POSIX
-            log.debug("State saved (%d repos)", len(self._state))
+            os.replace(tmp, self._state_path)
         except Exception as e:
             log.warning("Could not save state: %s", e)
             tmp.unlink(missing_ok=True)
