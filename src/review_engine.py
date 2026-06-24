@@ -1,4 +1,3 @@
-"""Review Engine — analyses PRs with LM Studio."""
 import fnmatch
 import logging
 from .api_gateway import LMStudioClient
@@ -60,16 +59,10 @@ Choose one and justify in one sentence:
 
 
 class ReviewEngine:
-    """Generates AI code reviews using LM Studio."""
-
     def __init__(self, lm_client: LMStudioClient = None):
         self.lm = lm_client or LMStudioClient()
 
     def analyze_pr(self, pull_request) -> dict:
-        """
-        Analyse a pull request; return dict with keys:
-          pr_number, pr_title, review (str), status ('success'|'error'), truncated (bool)
-        """
         pr_number = pull_request.number
         pr_title = pull_request.title
         log.info("Analysing PR #%d: %s", pr_number, pr_title)
@@ -130,7 +123,6 @@ class ReviewEngine:
         return "\n\n".join(parts)
 
     def _collect_meta(self, pull_request) -> dict:
-        """Gather lightweight PR metadata without extra API calls."""
         try:
             return {
                 "number":        pull_request.number,
@@ -153,11 +145,6 @@ class ReviewEngine:
             }
 
     def _extract_diff(self, pull_request) -> tuple[str, bool]:
-        """
-        Return (diff_string, was_truncated).
-        Skips ignored file patterns. Respects MAX_FILES_IN_DIFF, MAX_LINES_PER_FILE,
-        and MAX_DIFF_CHARS so we can safely fill the model's context window.
-        """
         try:
             all_files = list(pull_request.get_files())
             log.debug("PR #%d has %d changed file(s)", pull_request.number, len(all_files))
