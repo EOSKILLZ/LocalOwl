@@ -212,15 +212,25 @@ class PRCommenter:
                 "</details>",
             ]
 
+        _VERDICT_STATEMENT = {
+            "approve":     "✅ **Approved — safe to merge.**",
+            "suggestions": "⚠️ **Approved with suggestions — safe to merge, but consider the notes above.**",
+            "changes":     "❌ **Changes requested — resolve the issues above before merging.**",
+            "unknown":     "🔍 **Review complete — see sections above for details.**",
+        }
+
         repo_url = "https://github.com/EOSKILLZ/LocalOwl"
+        bot      = config.BOT_HANDLE
         parts += [
             "",
-            "<sub>**Reply with a command:** "
-            "`@diffowlbot review` re-review · "
-            "`@diffowlbot explain` plain-English summary · "
-            "`@diffowlbot summarize` key changes</sub>",
+            f"> {_VERDICT_STATEMENT.get(verdict, _VERDICT_STATEMENT['unknown'])}",
             "",
-            f"<sub>🦉 [LocalOwl]({repo_url}) &nbsp;·&nbsp; {timestamp}</sub>",
+            "---",
+            "",
+            f"<sub>**Commands:** `@{bot} review` &nbsp;·&nbsp; `@{bot} explain` &nbsp;·&nbsp; `@{bot} summarize` "
+            f"&nbsp;·&nbsp; [LocalOwl]({repo_url})</sub>",
+            "",
+            f"<sub>🦉 {timestamp}</sub>",
         ]
 
         return "\n".join(parts)
