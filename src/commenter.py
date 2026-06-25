@@ -40,16 +40,42 @@ def _verdict_to_review_event(verdict: str, enforce: bool) -> str:
     return "COMMENT"
 
 
+_VERDICT_EMOJI = (("❌", "changes"), ("⚠️", "suggestions"), ("✅", "approve"))
+
+
+def _verdict_of_line(s: str) -> str | None:
+    for emoji, verdict in _VERDICT_EMOJI:
+        if emoji in s:
+            return verdict
+    return None
+
+
 def _parse_verdict(text: str) -> str:
     marker = "## ✅ Verdict"
-    section = text.split(marker, 1)[-1] if marker in text else text
-    if "❌" in section:
-        return "changes"
-    if "⚠️" in section:
-        return "suggestions"
-    if "✅" in section:
-        return "approve"
-    return "unknown"
+    section = text.split(marker, 1)[-1].strip() if marker in text else text.strip()
+
+    bare_pick = None  # a verdict line with no justification — likely a template echo
+    for line in section.splitlines():
+        s = line.strip()
+        if not s:
+            continue
+        # skip the prompt's own instruction/rules lines if the model echoes them
+        if s.startswith(("-", "*", "Write", "Pick", "Choose", "State", "Use", "Rules", "Copy", "Do NOT", "If ")):
+            continue
+        # the reference line listing all three options at once — not a choice
+        if "✅" in s and "⚠️" in s and "❌" in s:
+            continue
+        verdict = _verdict_of_line(s)
+        if not verdict:
+            continue
+        # a line with justification text after the bold "**..." marker is the real
+        # pick; bare marker-only lines are likely echoes of the prompt's option list
+        tail = s.rsplit("**", 1)[-1].strip(" .—-") if "**" in s else ""
+        if tail:
+            return verdict
+        if bare_pick is None:
+            bare_pick = verdict
+    return bare_pick or "unknown"
 
 
 def _extract_issue_sections(review_text: str) -> list[tuple[str, str]]:
@@ -186,9 +212,15 @@ class PRCommenter:
                 "</details>",
             ]
 
+        repo_url = "https://github.com/EOSKILLZ/LocalOwl"
         parts += [
             "",
-            f"<sub>🦉 [LocalOwl](https://github.com/EOSKILLZ/LocalOwl) &nbsp;·&nbsp; {timestamp}</sub>",
+            "<sub>**Reply with a command:** "
+            "`@diffowlbot review` re-review · "
+            "`@diffowlbot explain` plain-English summary · "
+            "`@diffowlbot summarize` key changes</sub>",
+            "",
+            f"<sub>🦉 [LocalOwl]({repo_url}) &nbsp;·&nbsp; {timestamp}</sub>",
         ]
 
         return "\n".join(parts)
