@@ -4,7 +4,7 @@ import os
 import time
 from pathlib import Path
 from .api_gateway import GitHubClient
-from .config import GITHUB_REPOS, POLL_INTERVAL, STATE_FILE, SKIP_DRAFT_PRS, RECHECK_UPDATED_PRS
+from .config import GITHUB_REPOS, POLL_INTERVAL, STATE_FILE, SKIP_DRAFT_PRS, RECHECK_UPDATED_PRS, IGNORE_REPOS
 
 log = logging.getLogger("localowl.monitor")
 
@@ -26,11 +26,13 @@ class PullRequestMonitor:
         self._state: dict[str, dict[str, str]] = self._load_state()
 
     def start_monitoring(self, callback):
-        repos = self._resolve_repos()
+        repos = [r for r in self._resolve_repos() if r not in IGNORE_REPOS]
         if not repos:
             log.error("No repositories to monitor — set GITHUB_REPO in .env")
             return
 
+        if IGNORE_REPOS:
+            log.info("Ignoring repo(s): %s", ", ".join(sorted(IGNORE_REPOS)))
         log.info("Monitoring %d repo(s): %s", len(repos), ", ".join(repos))
         log.info("Poll interval: %ds | skip_drafts=%s | recheck_on_push=%s",
                  self.poll_interval, SKIP_DRAFT_PRS, RECHECK_UPDATED_PRS)

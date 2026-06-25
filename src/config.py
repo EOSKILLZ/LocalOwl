@@ -68,6 +68,12 @@ GITHUB_APP_PRIVATE_KEY = _load_app_private_key()
 STATS_URL    = os.getenv("STATS_URL", "")
 AUTO_APPROVE = os.getenv("AUTO_APPROVE", "false").lower() == "true"
 
+def _parse_ignore_repos() -> frozenset[str]:
+    raw = os.getenv("IGNORE_REPOS", "")
+    return frozenset(r.strip() for r in raw.split(",") if r.strip())
+
+IGNORE_REPOS: frozenset[str] = _parse_ignore_repos()
+
 POLL_INTERVAL  = int(os.getenv("POLL_INTERVAL", "300"))
 STATE_FILE     = os.getenv("STATE_FILE", ".processed_prs.json")
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
