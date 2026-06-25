@@ -28,6 +28,16 @@ _NO_ISSUE_PHRASES = [
 ]
 
 
+def _verdict_to_review_event(verdict: str, enforce: bool) -> str:
+    if not enforce:
+        return "COMMENT"
+    if verdict == "approve":
+        return "APPROVE"
+    if verdict == "changes":
+        return "REQUEST_CHANGES"
+    return "COMMENT"
+
+
 def _parse_verdict(text: str) -> str:
     marker = "## ✅ Verdict"
     section = text.split(marker, 1)[-1] if marker in text else text
@@ -84,20 +94,17 @@ class PRCommenter:
         pr_title: str,
         review_text: str,
         pr_meta: dict | None = None,
+        incremental: bool = False,
     ) -> bool:
-        log.info("Posting review on %s PR #%d", repo_name, pr_number)
-        comment    = self._format_comment(repo_name, pr_number, pr_title, review_text, pr_meta)
-        comment_id = self.github.post_comment(repo_name, pr_number, comment)
-        if comment_id is None:
-            log.error("Failed to post comment on %s PR #%d", repo_name, pr_number)
-            return False
+        log.info("Posting%s review on %s PR #%d", " incremental" if incremental else "", repo_name, pr_number)
+        comment = self._format_comment(repo_name, pr_number, pr_title, review_text, pr_meta, incremental)
         verdict = _parse_verdict(review_text)
-        if verdict == "approve" and self._should_auto_approve():
-            ok = self.github.submit_pr_review(repo_name, pr_number, "APPROVE")
-            if ok:
-                log.info("[%s] PR #%d auto-approved", repo_name, pr_number)
-            else:
-                log.warning("[%s] PR #%d auto-approve failed", repo_name, pr_number)
+        event   = _verdict_to_review_event(verdict, self._should_auto_approve())
+        review_id = self.github.submit_pr_review(repo_name, pr_number, event, body=comment)
+        if review_id is None:
+            log.error("Failed to submit review on %s PR #%d", repo_name, pr_number)
+            return False
+        log.info("[%s] PR #%d — %s review submitted", repo_name, pr_number, event)
         self._ping_stats()
         return True
 
@@ -123,6 +130,7 @@ class PRCommenter:
         pr_title: str,
         review_text: str,
         pr_meta: dict | None,
+        incremental: bool = False,
     ) -> str:
         verdict = _parse_verdict(review_text)
         emoji, label = _VERDICT_LABELS.get(verdict, ("🔍", "Reviewed"))
@@ -131,6 +139,8 @@ class PRCommenter:
 
         meta = pr_meta or {}
         meta_parts = [f"[#{pr_number} · {pr_title}]({pr_url})"]
+        if incremental:
+            meta_parts.append("🔄 re-review · new commits only")
         if meta.get("changed_files") is not None:
             additions = meta.get("additions", 0)
             deletions = meta.get("deletions", 0)
@@ -148,8 +158,9 @@ class PRCommenter:
         issue_sections = _extract_issue_sections(review_body)
         fix_prompt = _generate_fix_prompt(pr_title, issue_sections)
 
+        review_label = "Re-review" if incremental else "Review"
         parts = [
-            f"## 🦉 LocalOwl Review &nbsp; {emoji} {label}",
+            f"## 🦉 LocalOwl {review_label} &nbsp; {emoji} {label}",
             "",
             f"> {'&nbsp;·&nbsp; '.join(meta_parts)}",
             "",
