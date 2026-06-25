@@ -14,105 +14,106 @@ _FOCUS_LABELS = {
     "security":      "Security",
     "performance":   "Performance",
     "code-quality":  "Code Quality",
-    "test-coverage": "test coverage",
-    "docs":          "documentation",
+    "test-coverage": "Test Coverage",
+    "docs":          "Documentation",
 }
 
 _INCREMENTAL_SECTIONS = """\
 ## 📋 What Changed
-1–2 sentences on what these new commits add, fix, or remove compared to the last review.
+One or two sentences: what do these new commits add, fix, or remove compared to the last review?
 
-## 🔍 New Issues Found
-Bugs, security problems, performance concerns, or code quality issues introduced by these new commits only.
-Use the same severity scale (🔴 Critical / 🟠 High / 🟡 Medium / 🟢 Low).
-If none, write: _No new issues in these commits._
+## 🔍 New Issues Only
+Issues introduced by these new commits — bugs, security problems, performance concerns, or code quality problems.
+Severity: 🔴 Critical · 🟠 High · 🟡 Medium · 🟢 Low. Each finding: file, line, risk, fix.
+If none: **None found.**
 
 ## ✅ Status
-One sentence: is the PR now ready to merge, still needs work, or were earlier issues resolved?"""
+One sentence: is the PR ready to merge, still needs work, or were earlier issues resolved?"""
 
 _SECTIONS = """\
 ## 📋 Overview
-2–3 sentences: what does this PR do, and what is the likely motivation?
+What does this PR do and why? Two sentences max.
 
 ## 📁 File-by-File Breakdown
-For every changed file write one line:
-**`filename`** — what changed and any immediate concern (or "looks fine").
+One line per changed file: **`filename`** — what changed and any immediate concern, or "no concerns".
 
 ## 🐛 Bugs & Logic Errors
-List each bug with a severity badge and a short explanation.
-Severity scale:
-- 🔴 **Critical** — crash, data loss, or always-wrong behaviour
-- 🟠 **High** — wrong in common cases
-- 🟡 **Medium** — wrong in edge cases
-- 🟢 **Low** — minor incorrectness or off-by-one
-If none, write: _No bugs found._
+Each bug: severity badge, exact file + line, one-sentence explanation.
+🔴 Critical — crash/data loss · 🟠 High — wrong in common cases · 🟡 Medium — edge case · 🟢 Low — minor
+If none: **None found.**
 
 ## 🔒 Security
-Check for: hardcoded secrets, injection (SQL/shell/path), missing auth checks, \
-unsafe deserialisation, exposed sensitive data in logs, open redirects, \
-insecure defaults. Call out each finding with the filename and line.
-If none, write: _No security issues found._
+Check: hardcoded secrets, injection (SQL/shell/path/template), missing auth, unsafe deserialisation, \
+sensitive data in logs, open redirects, broken access control, insecure defaults.
+Each finding: file, line, exact risk, recommended fix.
+If none: **None found.**
 
 ## ⚡ Performance
-Flag: N+1 queries, unnecessary loops, blocking I/O in hot paths, \
-missing indexes or caching, large allocations. Be specific.
-If none, write: _No performance concerns._
+Check: N+1 queries, missing indexes, blocking I/O in hot paths, large allocations, unnecessary loops, missing caching.
+Each finding: file, line, impact, recommended fix.
+If none: **None found.**
 
 ## 🧹 Code Quality
-Note: duplicate logic, overly complex functions, unclear naming, \
-missing type hints, inadequate error handling, \
-missing tests for new behaviour, leftover debug code.
-If none, write: _No code quality concerns._
+Check: duplicated logic, overly complex functions, unclear naming, missing error handling, \
+missing tests for new behaviour, debug code left in.
+If none: **None found.**
 
 ## ✅ Verdict
-Choose exactly one and justify in one sentence:
+Pick exactly one and justify in one sentence:
 - ✅ **Approve** — ready to merge
 - ⚠️ **Approve with suggestions** — safe to merge, suggestions are non-blocking
-- ❌ **Request changes** — must fix the listed issues before merging"""
+- ❌ **Request changes** — must fix listed issues before merging"""
 
 
 def _build_incremental_prompt(config: dict | None = None) -> str:
     cfg   = config or {}
-    tone  = cfg.get("tone", "balanced")
+    tone  = cfg.get("tone", "technical")
     parts = [
-        "You are a senior software engineer reviewing only the new commits pushed to an already-reviewed pull request. "
-        "Focus exclusively on what changed in these new commits. "
-        "Do not repeat findings from the earlier review unless directly relevant to the new code. "
-        "Be concise.",
+        "You are a senior software engineer reviewing only the new commits pushed to an already-reviewed "
+        "pull request. Focus exclusively on what changed in these commits. "
+        "Do not repeat findings from the earlier review unless directly relevant to new code. "
+        "State every finding with the exact file and line number.",
     ]
-    if tone == "strict":
-        parts.append("Flag any potential issue introduced by the new code, even minor ones.")
+    if tone == "technical":
+        parts.append(
+            "Be strictly technical — reference language specs, security standards, or performance "
+            "characteristics where applicable. Every finding must include file, line, risk, and a concrete fix."
+        )
+    elif tone == "strict":
+        parts.append("Flag every potential issue introduced by the new code, even minor ones.")
     elif tone == "lenient":
-        parts.append("Focus on significant new issues only — skip style nits.")
+        parts.append("Focus on critical and high-severity new issues only — skip style nits.")
     return " ".join(parts) + "\n\nUse exactly this structure:\n\n---\n\n" + _INCREMENTAL_SECTIONS + "\n\n---"
 
 
 def _build_system_prompt(config: dict | None = None) -> str:
     cfg    = config or {}
-    tone   = cfg.get("tone", "balanced")
+    tone   = cfg.get("tone", "technical")
     style  = cfg.get("style", "detailed")
     focus  = set(cfg.get("focus") or list(_ALL_FOCUS))
     custom = (cfg.get("custom_instructions") or "").strip()
 
     parts = [
-        "You are a senior software engineer conducting a thorough pull request review. "
+        "You are a senior software engineer conducting a thorough, uncompromising pull request review. "
         "Analyse the diff carefully and produce a structured report. "
-        "Do NOT repeat lines from the diff verbatim. Do NOT invent issues not visible in the diff. "
-        "Be specific — name the file and line number when calling something out. "
-        "For short or trivial changes, keep each section brief — one sentence is enough "
-        "when there is nothing substantive to say."
+        "State every finding with the exact filename and line number. "
+        "Do not repeat diff lines verbatim. Do not invent issues not present in the diff. "
+        "For trivial or purely mechanical changes, keep each section to one sentence."
     ]
 
-    if tone == "strict":
-        parts.append("Be strict and thorough — flag any potential issue, even if minor.")
+    if tone == "technical":
+        parts.append(
+            "Be strictly technical and direct — no qualitative opinion, no encouragement. "
+            "Reference language specs, documented security standards, or performance characteristics "
+            "where applicable. Every finding must include file, line, exact risk, and a concrete fix."
+        )
+    elif tone == "strict":
+        parts.append("Be strict and thorough — flag every potential issue, even minor ones. Give no benefit of the doubt.")
     elif tone == "lenient":
-        parts.append("Focus on significant issues only. Skip style nitpicks and minor conventions.")
+        parts.append("Focus on critical and high-severity issues only. Skip style preferences and minor nitpicks.")
 
     if style == "concise":
-        parts.append(
-            "Be concise — keep each section to 1–3 lines. "
-            "Omit detail when nothing substantive applies."
-        )
+        parts.append("Be concise — 1–3 lines per section. Omit detail when nothing substantive applies.")
 
     active_focus = _ALL_FOCUS & focus
     if active_focus and active_focus != _ALL_FOCUS:
@@ -120,8 +121,8 @@ def _build_system_prompt(config: dict | None = None) -> str:
             _FOCUS_LABELS[k] for k in sorted(active_focus) if k in _FOCUS_LABELS
         )
         parts.append(
-            f"Focus your analysis especially on: {labels}. "
-            "Still include all sections but keep unfocused areas brief."
+            f"Prioritise: {labels}. "
+            "Still include all sections but keep non-priority areas brief."
         )
 
     prompt = " ".join(parts) + "\n\nUse exactly this structure:\n\n---\n\n" + _SECTIONS

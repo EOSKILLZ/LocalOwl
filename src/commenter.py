@@ -23,8 +23,10 @@ _ISSUE_HEADERS = [
 ]
 
 _NO_ISSUE_PHRASES = [
-    "no bugs found", "no security issues", "no performance concerns",
-    "no code quality concerns", "none found", "_no ", "no issues",
+    "none found", "no bugs found", "no security issues", "no performance concerns",
+    "no code quality concerns", "no issues", "no new issues", "no concerns",
+    "no findings", "nothing to flag", "nothing found", "not applicable",
+    "_no ", "n/a", "looks fine", "looks good",
 ]
 
 
@@ -175,10 +177,7 @@ class PRCommenter:
             parts += [
                 "",
                 "<details>",
-                "<summary>🤖 Fix these issues with AI — expand for prompt</summary>",
-                "<br>",
-                "",
-                "Paste into your AI assistant (Copilot, Cursor, Claude, etc.):",
+                "<summary>💡 Using AI? Use this prompt to fix the issues:</summary>",
                 "",
                 "````text",
                 fix_prompt,
