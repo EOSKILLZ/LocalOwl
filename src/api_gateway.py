@@ -110,7 +110,11 @@ class GitHubClient:
                 self._integration = gi
 
                 if GITHUB_APP_INSTALLATION_ID:
-                    install = gi.get_installation(int(GITHUB_APP_INSTALLATION_ID))
+                    # AppInstallationAuth avoids get_installation(id) which changed
+                    # signature in PyGithub 2.x (now requires owner+repo, not int id)
+                    install_auth = Auth.AppInstallationAuth(auth, int(GITHUB_APP_INSTALLATION_ID))
+                    log.info("GitHub auth: App '%s' installation %d", GITHUB_APP_ID, int(GITHUB_APP_INSTALLATION_ID))
+                    return Github(auth=install_auth)
                 else:
                     installs = list(gi.get_installations())
                     if not installs:
@@ -122,9 +126,8 @@ class GitHubClient:
                             "Set GITHUB_APP_INSTALLATION_ID to be explicit.",
                             len(installs), install.id,
                         )
-
-                log.info("GitHub auth: App '%s' installation %d", GITHUB_APP_ID, install.id)
-                return install.get_github_for_installation()
+                    log.info("GitHub auth: App '%s' installation %d", GITHUB_APP_ID, install.id)
+                    return install.get_github_for_installation()
 
             except Exception as e:
                 log.error("GitHub App auth failed (%s) — falling back to personal token", e)
