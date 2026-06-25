@@ -92,6 +92,7 @@ All options are in `.env.example`. The main ones:
 | `RECHECK_UPDATED_PRS` | `true` | Re-review when new commits are pushed |
 | `MAX_DIFF_CHARS` | `400000` | Max diff size sent to the model |
 | `IGNORE_FILE_PATTERNS` | `*.lock,...` | Files to skip in diffs |
+| `IGNORE_REPOS` | _(empty)_ | Comma-separated repos to skip entirely |
 | `AUTO_APPROVE` | `false` | Submit formal APPROVE/REQUEST\_CHANGES reviews by verdict; off = always COMMENT |
 
 ## Formal reviews
@@ -109,7 +110,7 @@ This lets you use LocalOwl as a required reviewer in branch protection rules. Wi
 Add a `.localowl.yml` to a repo root to customise the review style for that repo:
 
 ```yaml
-tone: strict        # strict | balanced | lenient
+tone: technical     # technical | strict | balanced | lenient
 style: concise      # detailed | concise
 focus:              # any subset of the list below
   - bugs
