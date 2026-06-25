@@ -65,6 +65,7 @@ def _load_app_private_key() -> str:
 
 GITHUB_APP_PRIVATE_KEY = _load_app_private_key()
 
+BOT_HANDLE   = os.getenv("BOT_HANDLE", "diffowlbot")
 STATS_URL    = os.getenv("STATS_URL", "")
 AUTO_APPROVE = os.getenv("AUTO_APPROVE", "false").lower() == "true"
 

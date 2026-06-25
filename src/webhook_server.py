@@ -5,7 +5,7 @@ import logging
 import re
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from .config import IGNORE_REPOS
+from .config import IGNORE_REPOS, BOT_HANDLE
 
 log = logging.getLogger("localowl.webhook")
 
@@ -14,7 +14,7 @@ _BOT_COMMANDS    = frozenset({"review", "explain", "summarize"})
 
 
 def _parse_bot_command(body: str) -> str | None:
-    m = re.search(r'@diffowlbot\s+(\w+)', body, re.IGNORECASE)
+    m = re.search(rf'@{re.escape(BOT_HANDLE)}\s+(\w+)', body, re.IGNORECASE)
     if m and m.group(1).lower() in _BOT_COMMANDS:
         return m.group(1).lower()
     return None
