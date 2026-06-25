@@ -2,12 +2,21 @@ import hashlib
 import hmac
 import json
 import logging
+import re
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 log = logging.getLogger("localowl.webhook")
 
 _HANDLED_ACTIONS = frozenset({"opened", "synchronize", "ready_for_review"})
+_BOT_COMMANDS    = frozenset({"review", "explain", "summarize"})
+
+
+def _parse_bot_command(body: str) -> str | None:
+    m = re.search(r'@diffowlbot\s+(\w+)', body, re.IGNORECASE)
+    if m and m.group(1).lower() in _BOT_COMMANDS:
+        return m.group(1).lower()
+    return None
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -56,15 +65,39 @@ class _Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 log.error("Failed to handle webhook payload: %s", e)
 
+        elif event == "issue_comment" and self.server.comment_callback:
+            try:
+                payload = json.loads(body)
+                if payload.get("action") != "created":
+                    return
+                issue = payload.get("issue", {})
+                if "pull_request" not in issue:
+                    return  # regular issue comment, not a PR
+                comment_body = payload.get("comment", {}).get("body", "")
+                command = _parse_bot_command(comment_body)
+                if not command:
+                    return
+                repo      = payload["repository"]["full_name"]
+                pr_number = issue["number"]
+                log.info("Webhook: @diffowlbot %s — %s PR #%d", command, repo, pr_number)
+                threading.Thread(
+                    target=self.server.comment_callback,
+                    args=(repo, pr_number, command),
+                    daemon=True,
+                ).start()
+            except Exception as e:
+                log.error("Failed to handle issue_comment webhook: %s", e)
+
     def log_message(self, *args):
         pass
 
 
 class WebhookServer:
-    def __init__(self, port: int, secret: str, callback):
-        self._server          = HTTPServer(("", port), _Handler)
-        self._server.secret   = secret
-        self._server.callback = callback
+    def __init__(self, port: int, secret: str, callback, comment_callback=None):
+        self._server                  = HTTPServer(("", port), _Handler)
+        self._server.secret           = secret
+        self._server.callback         = callback
+        self._server.comment_callback = comment_callback
 
     def serve_forever(self):
         log.info("Webhook server listening on :%d/webhook", self._server.server_address[1])

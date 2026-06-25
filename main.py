@@ -34,7 +34,8 @@ class LocalOwl:
         result = self.review_engine.analyze_pr(pull_request, repo_config=repo_config)
         if result["status"] == "success":
             posted = self.commenter.post_review_comment(
-                repo, pull_request.number, pull_request.title, result["review"]
+                repo, pull_request.number, pull_request.title,
+                result["review"], pr_meta=result.get("meta"),
             )
             if posted:
                 log.info("[%s] PR #%d — review posted", repo, pull_request.number)
@@ -42,6 +43,20 @@ class LocalOwl:
                 log.error("[%s] PR #%d — review generated but failed to post", repo, pull_request.number)
         else:
             log.error("[%s] PR #%d — review failed: %s", repo, pull_request.number, result["review"])
+
+    def handle_comment_command(self, repo: str, pr_number: int, command: str):
+        pr = self.monitor.github.get_pull_request(repo, pr_number)
+        if pr is None:
+            return
+        log.info("[%s] @diffowlbot %s — PR #%d", repo, command, pr_number)
+        if command == "review":
+            self.process_pull_request(repo, pr)
+        elif command == "explain":
+            text = self.review_engine.explain_pr(pr)
+            self.commenter.post_plain_comment(repo, pr_number, f"🦉 **LocalOwl Explanation**\n\n{text}")
+        elif command == "summarize":
+            text = self.review_engine.summarize_pr(pr)
+            self.commenter.post_plain_comment(repo, pr_number, f"🦉 **LocalOwl Summary**\n\n{text}")
 
     def handle_webhook_pr(self, repo: str, pr_number: int, head_sha: str, is_draft: bool):
         if SKIP_DRAFT_PRS and is_draft:
@@ -70,7 +85,8 @@ class LocalOwl:
             log.info("Mode    : webhook (port %d)", WEBHOOK_PORT)
             log.info("Webhook : https://<your-domain>/webhook")
             log.info("Repos   : all repos with the GitHub App installed")
-            server = WebhookServer(WEBHOOK_PORT, WEBHOOK_SECRET, self.handle_webhook_pr)
+            server = WebhookServer(WEBHOOK_PORT, WEBHOOK_SECRET, self.handle_webhook_pr,
+                                   comment_callback=self.handle_comment_command)
             try:
                 server.serve_forever()
             except KeyboardInterrupt:

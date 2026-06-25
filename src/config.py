@@ -33,7 +33,7 @@ def setup_logging(level: str = None) -> logging.Logger:
 LM_STUDIO_BASE_URL    = os.getenv("LM_STUDIO_BASE_URL", "http://localhost:1234/v1")
 LM_STUDIO_API_KEY     = os.getenv("LM_STUDIO_API_KEY", "")
 LM_STUDIO_MODEL       = os.getenv("LM_STUDIO_MODEL", "local")
-LM_STUDIO_MAX_TOKENS  = int(os.getenv("LM_STUDIO_MAX_TOKENS", "2000"))
+LM_STUDIO_MAX_TOKENS  = int(os.getenv("LM_STUDIO_MAX_TOKENS", "4096"))
 LM_STUDIO_TEMPERATURE = float(os.getenv("LM_STUDIO_TEMPERATURE", "0.3"))
 
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
@@ -65,7 +65,8 @@ def _load_app_private_key() -> str:
 
 GITHUB_APP_PRIVATE_KEY = _load_app_private_key()
 
-STATS_URL = os.getenv("STATS_URL", "")
+STATS_URL    = os.getenv("STATS_URL", "")
+AUTO_APPROVE = os.getenv("AUTO_APPROVE", "false").lower() == "true"
 
 POLL_INTERVAL  = int(os.getenv("POLL_INTERVAL", "300"))
 STATE_FILE     = os.getenv("STATE_FILE", ".processed_prs.json")
@@ -75,9 +76,9 @@ WEBHOOK_PORT   = int(os.getenv("WEBHOOK_PORT", "8090"))
 SKIP_DRAFT_PRS      = os.getenv("SKIP_DRAFT_PRS", "true").lower() == "true"
 RECHECK_UPDATED_PRS = os.getenv("RECHECK_UPDATED_PRS", "true").lower() == "true"
 
-MAX_DIFF_CHARS     = int(os.getenv("MAX_DIFF_CHARS", "30000"))
-MAX_FILES_IN_DIFF  = int(os.getenv("MAX_FILES_IN_DIFF", "20"))
-MAX_LINES_PER_FILE = int(os.getenv("MAX_LINES_PER_FILE", "300"))
+MAX_DIFF_CHARS     = int(os.getenv("MAX_DIFF_CHARS", "400000"))
+MAX_FILES_IN_DIFF  = int(os.getenv("MAX_FILES_IN_DIFF", "100"))
+MAX_LINES_PER_FILE = int(os.getenv("MAX_LINES_PER_FILE", "2000"))
 
 _DEFAULT_IGNORE = (
     "*.lock,package-lock.json,yarn.lock,pnpm-lock.yaml,"

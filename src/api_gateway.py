@@ -52,6 +52,16 @@ class LMStudioClient:
                 resp = self._session.post(self._endpoint, json=payload, timeout=120)
                 resp.raise_for_status()
                 return resp.json()["choices"][0]["message"]["content"].strip()
+            except requests.exceptions.HTTPError as e:
+                body = ""
+                try:
+                    body = e.response.text[:300]
+                except Exception:
+                    pass
+                last_error = f"HTTP {e.response.status_code}: {body}"
+                log.error("LM Studio HTTP error (attempt %d/%d): %s — %s",
+                          attempt, retries, e.response.status_code, body)
+                break
             except requests.exceptions.Timeout:
                 last_error = "timeout"
                 log.warning("LM Studio timeout (attempt %d/%d)", attempt, retries)
@@ -89,15 +99,15 @@ class LMStudioClient:
 
 class GitHubClient:
     def __init__(self):
+        self._integration: GithubIntegration | None = None
         self.github = self._build_github()
 
-    @staticmethod
-    def _build_github() -> Github:
-        # App auth preferred — per-installation token, auto-rotates hourly
+    def _build_github(self) -> Github:
         if GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY:
             try:
                 auth = Auth.AppAuth(str(GITHUB_APP_ID), GITHUB_APP_PRIVATE_KEY)
                 gi   = GithubIntegration(auth=auth)
+                self._integration = gi
 
                 if GITHUB_APP_INSTALLATION_ID:
                     install = gi.get_installation(int(GITHUB_APP_INSTALLATION_ID))
@@ -125,6 +135,25 @@ class GitHubClient:
 
         log.warning("No GitHub auth — unauthenticated (60 req/hr)")
         return Github()
+
+    def get_app_installations(self) -> list[dict]:
+        if not self._integration:
+            return []
+        try:
+            installs = list(self._integration.get_installations())
+            return [
+                {
+                    "id":           i.id,
+                    "account":      i.raw_data.get("account", {}).get("login", "unknown"),
+                    "account_type": i.raw_data.get("account", {}).get("type", "unknown"),
+                    "repo_selection": i.raw_data.get("repository_selection", "unknown"),
+                    "installed_at": i.raw_data.get("created_at", ""),
+                }
+                for i in installs
+            ]
+        except Exception as e:
+            log.debug("Could not fetch installations: %s", e)
+            return []
 
     def get_pull_requests(self, repo_name: str, state: str = "open") -> list:
         try:
@@ -187,6 +216,19 @@ class GitHubClient:
         except Exception as e:
             log.debug("[%s] Could not parse .localowl.yml: %s", repo_name, e)
             return None
+
+    def submit_pr_review(self, repo_name: str, pr_number: int, event: str) -> bool:
+        try:
+            pr = self.github.get_repo(repo_name).get_pull(pr_number)
+            pr.create_review(event=event)
+            log.info("Submitted %s review on %s PR #%d", event, repo_name, pr_number)
+            return True
+        except GithubException as e:
+            log.error("GitHub error submitting %s review on %s PR #%d: %s %s", event, repo_name, pr_number, e.status, e.data)
+            return False
+        except Exception as e:
+            log.error("Unexpected error submitting review: %s", e)
+            return False
 
     def log_rate_limit(self):
         try:
