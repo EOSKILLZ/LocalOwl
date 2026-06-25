@@ -3,7 +3,7 @@
 [![Stars](https://img.shields.io/github/stars/EOSKILLZ/LocalOwl?style=flat&color=f59e0b)](https://github.com/EOSKILLZ/LocalOwl/stargazers)
 [![Forks](https://img.shields.io/github/forks/EOSKILLZ/LocalOwl?style=flat&color=555)](https://github.com/EOSKILLZ/LocalOwl/forks)
 [![License](https://img.shields.io/github/license/EOSKILLZ/LocalOwl?style=flat)](LICENSE)
-[![Python](https://img.shields.io/badge/python-3.10+-blue?style=flat)](https://python.org)
+[![Python](https://img.shields.io/badge/python-3.11+-blue?style=flat)](https://python.org)
 
 Self-hosted AI code reviewer. Monitors your GitHub repos and posts structured PR reviews using a local LLM via LM Studio. No cloud, no subscriptions, no data leaving your machine.
 
