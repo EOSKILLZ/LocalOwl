@@ -76,6 +76,14 @@ WEBHOOK_PORT   = int(os.getenv("WEBHOOK_PORT", "8090"))
 SKIP_DRAFT_PRS      = os.getenv("SKIP_DRAFT_PRS", "true").lower() == "true"
 RECHECK_UPDATED_PRS = os.getenv("RECHECK_UPDATED_PRS", "true").lower() == "true"
 
+
+def _parse_ignore_repos() -> frozenset[str]:
+    raw = os.getenv("IGNORE_REPOS", "")
+    return frozenset(r.strip() for r in raw.split(",") if r.strip())
+
+
+IGNORE_REPOS: frozenset[str] = _parse_ignore_repos()
+
 MAX_DIFF_CHARS     = int(os.getenv("MAX_DIFF_CHARS", "400000"))
 MAX_FILES_IN_DIFF  = int(os.getenv("MAX_FILES_IN_DIFF", "100"))
 MAX_LINES_PER_FILE = int(os.getenv("MAX_LINES_PER_FILE", "2000"))

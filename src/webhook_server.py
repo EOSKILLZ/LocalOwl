@@ -5,6 +5,7 @@ import logging
 import re
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from .config import IGNORE_REPOS
 
 log = logging.getLogger("localowl.webhook")
 
@@ -53,6 +54,9 @@ class _Handler(BaseHTTPRequestHandler):
                 if action not in _HANDLED_ACTIONS:
                     return
                 repo      = payload["repository"]["full_name"]
+                if repo in IGNORE_REPOS:
+                    log.debug("Webhook: skipping %s (in IGNORE_REPOS)", repo)
+                    return
                 pr_number = payload["pull_request"]["number"]
                 head_sha  = payload["pull_request"]["head"]["sha"]
                 is_draft  = payload["pull_request"].get("draft", False)
