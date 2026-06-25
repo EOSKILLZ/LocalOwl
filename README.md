@@ -73,11 +73,11 @@ Reply to any PR comment to trigger a command:
 
 | Command | What it does |
 |---|---|
-| `@diffowlbot review` | Full review of the current PR state |
-| `@diffowlbot explain` | Plain-language explanation of what the PR does |
-| `@diffowlbot summarize` | 3–5 bullet summary of key changes |
+| `@yourbot review` | Full review of the current PR state |
+| `@yourbot explain` | Plain-language explanation of what the PR does |
+| `@yourbot summarize` | 3–5 bullet summary of key changes |
 
-> If you renamed the bot, set `BOT_HANDLE` in `.env` to match.
+> Replace `yourbot` with your GitHub App's username. Set `BOT_HANDLE` in `.env` to match.
 
 ---
 
@@ -104,7 +104,7 @@ All options are in `.env.example`. Key ones:
 | `RECHECK_UPDATED_PRS` | `true` | Re-review on new commits |
 | `IGNORE_REPOS` | — | Comma-separated repos to never review |
 | `AUTO_APPROVE` | `false` | Submit formal APPROVE / REQUEST_CHANGES reviews |
-| `BOT_HANDLE` | `diffowlbot` | The bot's GitHub username, used for command parsing |
+| `BOT_HANDLE` | _(your app name)_ | Your GitHub App's username — used to parse comment commands |
 
 ### `AUTO_APPROVE=true`
 
