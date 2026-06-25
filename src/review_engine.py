@@ -59,10 +59,9 @@ missing tests for new behaviour, debug code left in.
 If none: **None found.**
 
 ## ✅ Verdict
-Pick exactly one and justify in one sentence:
-- ✅ **Approve** — ready to merge
-- ⚠️ **Approve with suggestions** — safe to merge, suggestions are non-blocking
-- ❌ **Request changes** — must fix listed issues before merging"""
+Write your chosen verdict on its own line, then a single sentence of justification. Do not repeat the other options.
+
+✅ **Approve** · ⚠️ **Approve with suggestions** · ❌ **Request changes**"""
 
 
 def _build_incremental_prompt(config: dict | None = None) -> str:

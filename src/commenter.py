@@ -42,13 +42,22 @@ def _verdict_to_review_event(verdict: str, enforce: bool) -> str:
 
 def _parse_verdict(text: str) -> str:
     marker = "## ✅ Verdict"
-    section = text.split(marker, 1)[-1] if marker in text else text
-    if "❌" in section:
-        return "changes"
-    if "⚠️" in section:
-        return "suggestions"
-    if "✅" in section:
-        return "approve"
+    section = text.split(marker, 1)[-1].strip() if marker in text else text.strip()
+    for line in section.splitlines():
+        s = line.strip()
+        if not s:
+            continue
+        # skip instruction lines and the options reference line (contains all three emojis)
+        if s.startswith(("-", "*", "Write", "Pick", "Choose", "State", "Use")):
+            continue
+        if "✅" in s and "⚠️" in s and "❌" in s:
+            continue
+        if "❌" in s:
+            return "changes"
+        if "⚠️" in s:
+            return "suggestions"
+        if "✅" in s:
+            return "approve"
     return "unknown"
 
 
@@ -188,7 +197,8 @@ class PRCommenter:
 
         parts += [
             "",
-            f"<sub>🦉 [LocalOwl](https://github.com/EOSKILLZ/LocalOwl) &nbsp;·&nbsp; {timestamp}</sub>",
+            f"<sub>🦉 [LocalOwl](https://github.com/EOSKILLZ/LocalOwl) &nbsp;·&nbsp; {timestamp} &nbsp;·&nbsp; "
+            f"reply `@diffowlbot review` &nbsp;`@diffowlbot explain` &nbsp;`@diffowlbot summarize`</sub>",
         ]
 
         return "\n".join(parts)
