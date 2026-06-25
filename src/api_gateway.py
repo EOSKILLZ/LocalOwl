@@ -217,18 +217,18 @@ class GitHubClient:
             log.debug("[%s] Could not parse .localowl.yml: %s", repo_name, e)
             return None
 
-    def submit_pr_review(self, repo_name: str, pr_number: int, event: str) -> bool:
+    def submit_pr_review(self, repo_name: str, pr_number: int, event: str, body: str = "") -> int | None:
         try:
-            pr = self.github.get_repo(repo_name).get_pull(pr_number)
-            pr.create_review(event=event)
-            log.info("Submitted %s review on %s PR #%d", event, repo_name, pr_number)
-            return True
+            pr     = self.github.get_repo(repo_name).get_pull(pr_number)
+            review = pr.create_review(body=body, event=event)
+            log.info("Submitted %s review on %s PR #%d (id=%d)", event, repo_name, pr_number, review.id)
+            return review.id
         except GithubException as e:
             log.error("GitHub error submitting %s review on %s PR #%d: %s %s", event, repo_name, pr_number, e.status, e.data)
-            return False
+            return None
         except Exception as e:
             log.error("Unexpected error submitting review: %s", e)
-            return False
+            return None
 
     def log_rate_limit(self):
         try:

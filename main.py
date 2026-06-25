@@ -20,7 +20,7 @@ class LocalOwl:
         self.review_engine = ReviewEngine()
         self.commenter     = PRCommenter(github_client=shared_gh)
 
-    def process_pull_request(self, repo: str, pull_request):
+    def process_pull_request(self, repo: str, pull_request, since_sha: str | None = None):
         log.info("[%s] Processing PR #%d: %s", repo, pull_request.number, pull_request.title)
         repo_config = self.monitor.github.get_repo_config(repo)
         if repo_config:
@@ -31,11 +31,12 @@ class LocalOwl:
                 repo_config.get("style", "detailed"),
                 ",".join(repo_config.get("focus") or []) or "all",
             )
-        result = self.review_engine.analyze_pr(pull_request, repo_config=repo_config)
+        result = self.review_engine.analyze_pr(pull_request, repo_config=repo_config, since_sha=since_sha)
         if result["status"] == "success":
             posted = self.commenter.post_review_comment(
                 repo, pull_request.number, pull_request.title,
                 result["review"], pr_meta=result.get("meta"),
+                incremental=result.get("incremental", False),
             )
             if posted:
                 log.info("[%s] PR #%d — review posted", repo, pull_request.number)
@@ -51,6 +52,8 @@ class LocalOwl:
         log.info("[%s] @diffowlbot %s — PR #%d", repo, command, pr_number)
         if command == "review":
             self.process_pull_request(repo, pr)
+            self.monitor._mark_processed(repo, pr_number, pr.head.sha)
+            self.monitor._save_state()
         elif command == "explain":
             text = self.review_engine.explain_pr(pr)
             self.commenter.post_plain_comment(repo, pr_number, f"🦉 **LocalOwl Explanation**\n\n{text}")
@@ -62,10 +65,16 @@ class LocalOwl:
         if SKIP_DRAFT_PRS and is_draft:
             log.info("[%s] Skipping draft PR #%d (webhook)", repo, pr_number)
             return
+        prev_sha = self.monitor._state.get(repo, {}).get(str(pr_number))
+        if prev_sha == head_sha:
+            log.debug("[%s] PR #%d already reviewed at %s — skipping", repo, pr_number, head_sha[:7])
+            return
         pr = self.monitor.github.get_pull_request(repo, pr_number)
         if pr is None:
             return
-        self.process_pull_request(repo, pr)
+        self.process_pull_request(repo, pr, since_sha=prev_sha)
+        self.monitor._mark_processed(repo, pr_number, head_sha)
+        self.monitor._save_state()
 
     def start(self):
         log.info("=" * 55)

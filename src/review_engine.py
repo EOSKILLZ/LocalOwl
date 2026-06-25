@@ -18,6 +18,18 @@ _FOCUS_LABELS = {
     "docs":          "documentation",
 }
 
+_INCREMENTAL_SECTIONS = """\
+## 📋 What Changed
+1–2 sentences on what these new commits add, fix, or remove compared to the last review.
+
+## 🔍 New Issues Found
+Bugs, security problems, performance concerns, or code quality issues introduced by these new commits only.
+Use the same severity scale (🔴 Critical / 🟠 High / 🟡 Medium / 🟢 Low).
+If none, write: _No new issues in these commits._
+
+## ✅ Status
+One sentence: is the PR now ready to merge, still needs work, or were earlier issues resolved?"""
+
 _SECTIONS = """\
 ## 📋 Overview
 2–3 sentences: what does this PR do, and what is the likely motivation?
@@ -57,6 +69,22 @@ Choose exactly one and justify in one sentence:
 - ✅ **Approve** — ready to merge
 - ⚠️ **Approve with suggestions** — safe to merge, suggestions are non-blocking
 - ❌ **Request changes** — must fix the listed issues before merging"""
+
+
+def _build_incremental_prompt(config: dict | None = None) -> str:
+    cfg   = config or {}
+    tone  = cfg.get("tone", "balanced")
+    parts = [
+        "You are a senior software engineer reviewing only the new commits pushed to an already-reviewed pull request. "
+        "Focus exclusively on what changed in these new commits. "
+        "Do not repeat findings from the earlier review unless directly relevant to the new code. "
+        "Be concise.",
+    ]
+    if tone == "strict":
+        parts.append("Flag any potential issue introduced by the new code, even minor ones.")
+    elif tone == "lenient":
+        parts.append("Focus on significant new issues only — skip style nits.")
+    return " ".join(parts) + "\n\nUse exactly this structure:\n\n---\n\n" + _INCREMENTAL_SECTIONS + "\n\n---"
 
 
 def _build_system_prompt(config: dict | None = None) -> str:
@@ -117,17 +145,22 @@ class ReviewEngine:
     def __init__(self, lm_client: LMStudioClient = None):
         self.lm = lm_client or LMStudioClient()
 
-    def analyze_pr(self, pull_request, repo_config: dict | None = None) -> dict:
-        pr_number = pull_request.number
-        pr_title  = pull_request.title
-        log.info("Analysing PR #%d: %s", pr_number, pr_title)
+    def analyze_pr(self, pull_request, repo_config: dict | None = None, since_sha: str | None = None) -> dict:
+        pr_number   = pull_request.number
+        pr_title    = pull_request.title
+        incremental = bool(since_sha)
+        log.info("Analysing PR #%d%s: %s", pr_number, " (incremental)" if incremental else "", pr_title)
 
         try:
-            extra    = _extra_ignore_patterns(repo_config)
-            diff, truncated = self._extract_diff(pull_request, extra_patterns=extra)
-            meta     = self._collect_meta(pull_request)
-            prompt   = _build_system_prompt(repo_config)
-            review   = self._generate_review(pr_title, pull_request.body or "", diff, truncated, meta, prompt)
+            extra = _extra_ignore_patterns(repo_config)
+            if incremental:
+                diff, truncated = self._extract_incremental_diff(pull_request, since_sha, extra_patterns=extra)
+                prompt = _build_incremental_prompt(repo_config)
+            else:
+                diff, truncated = self._extract_diff(pull_request, extra_patterns=extra)
+                prompt = _build_system_prompt(repo_config)
+            meta   = self._collect_meta(pull_request)
+            review = self._generate_review(pr_title, pull_request.body or "", diff, truncated, meta, prompt)
 
             if not review:
                 log.warning("PR #%d: LM Studio returned an empty review", pr_number)
@@ -135,12 +168,13 @@ class ReviewEngine:
 
             log.info("PR #%d: review generated (%d chars)", pr_number, len(review))
             return {
-                "pr_number": pr_number,
-                "pr_title":  pr_title,
-                "review":    review,
-                "status":    "success",
-                "truncated": truncated,
-                "meta":      meta,
+                "pr_number":   pr_number,
+                "pr_title":    pr_title,
+                "review":      review,
+                "status":      "success",
+                "truncated":   truncated,
+                "meta":        meta,
+                "incremental": incremental,
             }
 
         except Exception as e:
@@ -204,52 +238,68 @@ class ReviewEngine:
             }
 
     def _extract_diff(self, pull_request, extra_patterns: list[str] | None = None) -> tuple[str, bool]:
-        all_patterns = list(IGNORE_FILE_PATTERNS) + (extra_patterns or [])
         try:
-            all_files = list(pull_request.get_files())
-            log.debug("PR #%d has %d changed file(s)", pull_request.number, len(all_files))
-
-            reviewable = [f for f in all_files if not _should_ignore(f.filename, all_patterns)]
-            skipped    = len(all_files) - len(reviewable)
-            if skipped:
-                log.debug("Skipped %d file(s) matching ignore patterns", skipped)
-
-            sections    = []
-            total_chars = 0
-            truncated   = False
-
-            for f in reviewable[:MAX_FILES_IN_DIFF]:
-                header = f"### {f.filename} (+{f.additions}/-{f.deletions})"
-                patch  = (f.patch or "").strip()
-                if patch:
-                    lines = patch.splitlines()
-                    if len(lines) > MAX_LINES_PER_FILE:
-                        patch = "\n".join(lines[:MAX_LINES_PER_FILE])
-                        patch += f"\n… ({len(lines) - MAX_LINES_PER_FILE} more lines)"
-                section = f"{header}\n{patch}" if patch else header
-                total_chars += len(section)
-
-                if total_chars > MAX_DIFF_CHARS:
-                    truncated = True
-                    sections.append("… (remaining files omitted — diff size limit reached)")
-                    break
-
-                sections.append(section)
-
-            if len(reviewable) > MAX_FILES_IN_DIFF:
-                truncated = True
-                sections.append(f"… ({len(reviewable) - MAX_FILES_IN_DIFF} more files not shown)")
-
-            result = "\n\n".join(sections)
-            log.debug(
-                "Diff: %d chars, %d section(s), truncated=%s",
-                len(result), len(sections), truncated,
-            )
-            return result, truncated
-
+            files = list(pull_request.get_files())
+            log.debug("PR #%d has %d changed file(s)", pull_request.number, len(files))
+            return self._build_diff(files, extra_patterns)
         except Exception as e:
             log.warning("Could not extract diff for PR #%d: %s", pull_request.number, e)
             return "", False
+
+    def _extract_incremental_diff(
+        self, pull_request, since_sha: str, extra_patterns: list[str] | None = None
+    ) -> tuple[str, bool]:
+        try:
+            comparison = pull_request.base.repo.compare(since_sha, pull_request.head.sha)
+            files      = list(comparison.files)
+            log.debug(
+                "PR #%d incremental diff %s..%s — %d file(s)",
+                pull_request.number, since_sha[:7], pull_request.head.sha[:7], len(files),
+            )
+            if not files:
+                log.info("PR #%d: no file changes since last review", pull_request.number)
+                return "", False
+            return self._build_diff(files, extra_patterns)
+        except Exception as e:
+            log.warning("Could not get incremental diff for PR #%d (%s); falling back to full diff", pull_request.number, e)
+            return self._extract_diff(pull_request, extra_patterns)
+
+    def _build_diff(self, files: list, extra_patterns: list[str] | None = None) -> tuple[str, bool]:
+        all_patterns = list(IGNORE_FILE_PATTERNS) + (extra_patterns or [])
+        reviewable   = [f for f in files if not _should_ignore(f.filename, all_patterns)]
+        skipped      = len(files) - len(reviewable)
+        if skipped:
+            log.debug("Skipped %d file(s) matching ignore patterns", skipped)
+
+        sections    = []
+        total_chars = 0
+        truncated   = False
+
+        for f in reviewable[:MAX_FILES_IN_DIFF]:
+            header = f"### {f.filename} (+{f.additions}/-{f.deletions})"
+            patch  = (f.patch or "").strip()
+            if patch:
+                lines = patch.splitlines()
+                if len(lines) > MAX_LINES_PER_FILE:
+                    patch = "\n".join(lines[:MAX_LINES_PER_FILE])
+                    patch += f"\n… ({len(lines) - MAX_LINES_PER_FILE} more lines)"
+            section      = f"{header}\n{patch}" if patch else header
+            total_chars += len(section)
+
+            if total_chars > MAX_DIFF_CHARS:
+                truncated = True
+                sections.append("… (remaining files omitted — diff size limit reached)")
+                break
+
+            sections.append(section)
+
+        if len(reviewable) > MAX_FILES_IN_DIFF:
+            truncated = True
+            sections.append(f"… ({len(reviewable) - MAX_FILES_IN_DIFF} more files not shown)")
+
+        result = "\n\n".join(sections)
+        log.debug("Diff: %d chars, %d section(s), truncated=%s", len(result), len(sections), truncated)
+        return result, truncated
 
     def explain_pr(self, pull_request) -> str:
         diff, _ = self._extract_diff(pull_request)
