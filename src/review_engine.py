@@ -140,6 +140,7 @@ class ReviewEngine:
                 "review":    review,
                 "status":    "success",
                 "truncated": truncated,
+                "meta":      meta,
             }
 
         except Exception as e:
@@ -249,6 +250,31 @@ class ReviewEngine:
         except Exception as e:
             log.warning("Could not extract diff for PR #%d: %s", pull_request.number, e)
             return "", False
+
+    def explain_pr(self, pull_request) -> str:
+        diff, _ = self._extract_diff(pull_request)
+        meta     = self._collect_meta(pull_request)
+        system   = (
+            "Explain what this pull request does in plain language. "
+            "Focus on intent: what problem does it solve and what changed? "
+            "Write for a non-technical reviewer. 3–5 sentences, no code blocks."
+        )
+        user_msg = self._build_user_message(
+            pull_request.title, pull_request.body or "", diff, False, meta
+        )
+        return self.lm.chat(system, user_msg) or "Could not generate explanation."
+
+    def summarize_pr(self, pull_request) -> str:
+        diff, _ = self._extract_diff(pull_request)
+        meta     = self._collect_meta(pull_request)
+        system   = (
+            "Summarize this pull request in 3–5 bullet points (one sentence each). "
+            "Key changes only — no opinions or review commentary."
+        )
+        user_msg = self._build_user_message(
+            pull_request.title, pull_request.body or "", diff, False, meta
+        )
+        return self.lm.chat(system, user_msg) or "Could not generate summary."
 
     @staticmethod
     def _error_result(pr_number: int, pr_title: str, reason: str) -> dict:
