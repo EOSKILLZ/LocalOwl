@@ -20,69 +20,108 @@ _FOCUS_LABELS = {
 
 _INCREMENTAL_SECTIONS = """\
 ## 📋 What Changed
-One or two sentences: what do these new commits add, fix, or remove compared to the last review?
+Write 1 or 2 sentences. Say what the new commits add, fix, or remove since the last review.
 
 ## 🔍 New Issues Only
-Issues introduced by these new commits — bugs, security problems, performance concerns, or code quality problems.
-Severity: 🔴 Critical · 🟠 High · 🟡 Medium · 🟢 Low. Each finding: file, line, risk, fix.
-If none: **None found.**
+Look ONLY at the new commits. List any new bug, security hole, slow code, or messy code they add.
+Write each issue on its own line like this:
+`path/to/file.py:42` 🔴 Problem in one sentence. Fix in one sentence.
+Pick the badge: 🔴 Critical · 🟠 High · 🟡 Medium · 🟢 Low.
+If you find nothing wrong, write exactly: **None found.**
 
 ## ✅ Status
-One sentence: is the PR ready to merge, still needs work, or were earlier issues resolved?"""
+Write 1 sentence. Is the PR ready to merge now, or does it still need work?"""
 
+# Each section gives the model a copyable line format and an exact empty-case
+# string — small models follow concrete examples far better than abstract rules.
 _SECTIONS = """\
 ## 📋 Overview
-What does this PR do and why? Two sentences max.
+Write 1 or 2 short sentences. Say what this PR does and why.
 
 ## 📁 File-by-File Breakdown
-One line per changed file: **`filename`** — what changed and any immediate concern, or "no concerns".
+Write one line for each changed file, exactly like this:
+**`path/to/file.py`** — what changed here, and any concern (or write "no concerns").
 
 ## 🐛 Bugs & Logic Errors
-Each bug: severity badge, exact file + line, one-sentence explanation.
-🔴 Critical — crash/data loss · 🟠 High — wrong in common cases · 🟡 Medium — edge case · 🟢 Low — minor
-If none: **None found.**
+Find code that does the wrong thing: crashes, wrong output, bad if/else, off-by-one, null/undefined, race conditions.
+Write each bug on its own line, exactly like this:
+`path/to/file.py:42` 🔴 The bug in one sentence. How to fix it in one sentence.
+Pick the badge by how bad it is:
+🔴 Critical = crash or data loss · 🟠 High = wrong in normal use · 🟡 Medium = wrong in rare cases · 🟢 Low = small mistake
+If you find no bugs, write exactly: **None found.**
 
 ## 🔒 Security
-Check: hardcoded secrets, injection (SQL/shell/path/template), missing auth, unsafe deserialisation, \
-sensitive data in logs, open redirects, broken access control, insecure defaults.
-Each finding: file, line, exact risk, recommended fix.
-If none: **None found.**
+Look for: passwords or API keys written in the code, SQL/shell/path injection, missing login checks, \
+unsafe data parsing, secrets printed to logs, open redirects.
+Write each problem on its own line, exactly like this:
+`path/to/file.py:42` 🔴 The risk in one sentence. How to fix it in one sentence.
+If you find no security problems, write exactly: **None found.**
 
 ## ⚡ Performance
-Check: N+1 queries, missing indexes, blocking I/O in hot paths, large allocations, unnecessary loops, missing caching.
-Each finding: file, line, impact, recommended fix.
-If none: **None found.**
+Look for: a database call inside a loop, missing database index, slow blocking calls, loading too much into memory, \
+work repeated that could be cached.
+Write each problem on its own line, exactly like this:
+`path/to/file.py:42` 🟠 What is slow in one sentence. How to fix it in one sentence.
+If you find no performance problems, write exactly: **None found.**
 
 ## 🧹 Code Quality
-Check: duplicated logic, overly complex functions, unclear naming, missing error handling, \
-missing tests for new behaviour, debug code left in.
-If none: **None found.**
+Look for: copy-pasted code, functions that are too long, confusing names, missing error handling, \
+missing tests for new code, leftover debug prints or commented-out code.
+Write each problem on its own line, exactly like this:
+`path/to/file.py:42` What is messy in one sentence. How to improve it in one sentence.
+If you find nothing, write exactly: **None found.**
 
 ## ✅ Verdict
-Write your chosen verdict on its own line, then a single sentence of justification. Do not repeat the other options.
+Pick ONE line below and copy it. Then add one sentence saying why. Do NOT copy the other two lines.
 
-✅ **Approve** · ⚠️ **Approve with suggestions** · ❌ **Request changes**"""
+✅ **Approve**
+⚠️ **Approve with suggestions**
+❌ **Request changes**
+
+Rules:
+- Copy ✅ **Approve** only if every section above says **None found.**
+- Copy ⚠️ **Approve with suggestions** if the issues are minor and safe to merge.
+- Copy ❌ **Request changes** only if there is at least one 🔴 Critical or 🟠 High issue."""
+
+
+# Hard rules every model needs, written as short plain commands. Kept identical
+# between full and incremental prompts so a 1B model sees one consistent contract.
+_BASE_RULES = (
+    "You are an expert code reviewer. You read a code diff and write a clear review.\n\n"
+    "Follow these rules:\n"
+    "1. Only talk about code you can see in the diff. Never guess about code that is not shown.\n"
+    "2. Never invent a problem. If the code is fine, say it is fine.\n"
+    "3. Every problem you report must name the file and line, like `path/file.py:42`.\n"
+    "4. Do not copy lines from the diff. Explain in your own words.\n"
+    "5. Write the section headers exactly as given. Keep every section, in order.\n"
+    "6. If a change is tiny or simple, keep each section to one short line.\n"
+    "7. When a section has no problems, write exactly: **None found.**"
+)
+
+
+def _tone_rule(tone: str) -> str | None:
+    if tone == "technical":
+        return ("Tone: be direct and technical. No praise, no filler. "
+                "For each problem give the exact risk and a concrete one-line fix.")
+    if tone == "strict":
+        return "Tone: be strict. Report every problem you find, even small ones."
+    if tone == "lenient":
+        return "Tone: be relaxed. Report only Critical and High problems. Skip small style issues."
+    return None  # balanced — no extra tone rule
 
 
 def _build_incremental_prompt(config: dict | None = None) -> str:
     cfg   = config or {}
     tone  = cfg.get("tone", "technical")
     parts = [
-        "You are a senior software engineer reviewing only the new commits pushed to an already-reviewed "
-        "pull request. Focus exclusively on what changed in these commits. "
-        "Do not repeat findings from the earlier review unless directly relevant to new code. "
-        "State every finding with the exact file and line number.",
+        _BASE_RULES,
+        "This PR was already reviewed once. Now review ONLY the new commits since then. "
+        "Do not repeat old findings unless the new code makes them worse.",
     ]
-    if tone == "technical":
-        parts.append(
-            "Be strictly technical — reference language specs, security standards, or performance "
-            "characteristics where applicable. Every finding must include file, line, risk, and a concrete fix."
-        )
-    elif tone == "strict":
-        parts.append("Flag every potential issue introduced by the new code, even minor ones.")
-    elif tone == "lenient":
-        parts.append("Focus on critical and high-severity new issues only — skip style nits.")
-    return " ".join(parts) + "\n\nUse exactly this structure:\n\n---\n\n" + _INCREMENTAL_SECTIONS + "\n\n---"
+    tr = _tone_rule(tone)
+    if tr:
+        parts.append(tr)
+    return "\n\n".join(parts) + "\n\nWrite your review using exactly these sections:\n\n---\n\n" + _INCREMENTAL_SECTIONS + "\n\n---"
 
 
 def _build_system_prompt(config: dict | None = None) -> str:
@@ -92,27 +131,14 @@ def _build_system_prompt(config: dict | None = None) -> str:
     focus  = set(cfg.get("focus") or list(_ALL_FOCUS))
     custom = (cfg.get("custom_instructions") or "").strip()
 
-    parts = [
-        "You are a senior software engineer conducting a thorough, uncompromising pull request review. "
-        "Analyse the diff carefully and produce a structured report. "
-        "State every finding with the exact filename and line number. "
-        "Do not repeat diff lines verbatim. Do not invent issues not present in the diff. "
-        "For trivial or purely mechanical changes, keep each section to one sentence."
-    ]
+    parts = [_BASE_RULES]
 
-    if tone == "technical":
-        parts.append(
-            "Be strictly technical and direct — no qualitative opinion, no encouragement. "
-            "Reference language specs, documented security standards, or performance characteristics "
-            "where applicable. Every finding must include file, line, exact risk, and a concrete fix."
-        )
-    elif tone == "strict":
-        parts.append("Be strict and thorough — flag every potential issue, even minor ones. Give no benefit of the doubt.")
-    elif tone == "lenient":
-        parts.append("Focus on critical and high-severity issues only. Skip style preferences and minor nitpicks.")
+    tr = _tone_rule(tone)
+    if tr:
+        parts.append(tr)
 
     if style == "concise":
-        parts.append("Be concise — 1–3 lines per section. Omit detail when nothing substantive applies.")
+        parts.append("Length: keep each section to 1 to 3 short lines.")
 
     active_focus = _ALL_FOCUS & focus
     if active_focus and active_focus != _ALL_FOCUS:
@@ -120,14 +146,14 @@ def _build_system_prompt(config: dict | None = None) -> str:
             _FOCUS_LABELS[k] for k in sorted(active_focus) if k in _FOCUS_LABELS
         )
         parts.append(
-            f"Prioritise: {labels}. "
-            "Still include all sections but keep non-priority areas brief."
+            f"Pay the most attention to: {labels}. "
+            "Still fill in every section, but keep the others short."
         )
 
-    prompt = " ".join(parts) + "\n\nUse exactly this structure:\n\n---\n\n" + _SECTIONS
+    prompt = "\n\n".join(parts) + "\n\nWrite your review using exactly these sections:\n\n---\n\n" + _SECTIONS
 
     if custom:
-        prompt += f"\n\n**Additional instructions from the repo owner:** {custom}"
+        prompt += f"\n\n**Extra instructions from the repo owner (follow these too):** {custom}"
 
     return prompt + "\n\n---"
 
