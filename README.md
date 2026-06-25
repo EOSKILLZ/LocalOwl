@@ -1,19 +1,29 @@
-# LocalOwl
+# 🦉 LocalOwl
 
 [![Stars](https://img.shields.io/github/stars/EOSKILLZ/LocalOwl?style=flat&color=f59e0b)](https://github.com/EOSKILLZ/LocalOwl/stargazers)
 [![Forks](https://img.shields.io/github/forks/EOSKILLZ/LocalOwl?style=flat&color=555)](https://github.com/EOSKILLZ/LocalOwl/forks)
 [![License](https://img.shields.io/github/license/EOSKILLZ/LocalOwl?style=flat)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11+-blue?style=flat)](https://python.org)
 
-Self-hosted AI code reviewer. Monitors your GitHub repos and posts structured PR reviews using a local LLM via LM Studio. No cloud, no subscriptions, no data leaving your machine.
+> Self-hosted AI code reviewer. Open a PR, get a review — bugs, security issues, and a clear approve/deny verdict, posted as a bot comment. Runs 100% locally. No cloud, no subscription, no data leaving your machine.
+
+---
+
+## How it works
+
+LocalOwl connects to your GitHub repos and watches for pull requests. When one opens or gets new commits, it pulls the diff, sends it to a local LLM running in LM Studio, and posts a structured review as a GitHub comment.
+
+That's it.
 
 ---
 
 ## Requirements
 
 - Python 3.10+
-- [LM Studio](https://lmstudio.ai) with a model loaded and the local server running on port 1234
-- A GitHub App (recommended) or personal access token
+- [LM Studio](https://lmstudio.ai) with a model loaded and the server running on port 1234
+- A GitHub App or personal access token
+
+---
 
 ## Setup
 
@@ -23,96 +33,99 @@ cd LocalOwl
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
-```
-
-Edit `.env` with your credentials, then:
-
-```bash
+# edit .env with your credentials
 python main.py
 ```
 
-Open a PR on any configured repo and a review posts within the next poll cycle.
+---
 
 ## GitHub App setup
 
-Go to `github.com/settings/apps` → New GitHub App.
+Go to `github.com/settings/apps` → New GitHub App and give it these permissions:
 
-**Permissions required:**
-- Contents: Read
-- Pull requests: Read & Write
-- Issues: Read (required for comment commands via webhook)
+| Permission | Level |
+|---|---|
+| Contents | Read |
+| Pull requests | Read & Write |
+| Issues | Read |
 
-**Webhook events** (if using webhook mode):
-- Pull requests
-- Issues
+Subscribe to **Pull request** and **Issue comment** webhook events. Download the private key, drop it in this folder, and set `GITHUB_APP_ID` + `GITHUB_APP_PRIVATE_KEY_PATH` in `.env`.
 
-Download the private key into this folder and install the app on your repos. Set `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY_PATH` in `.env`.
+> A personal token (`GITHUB_TOKEN`) works too but doesn't support webhook mode.
 
-A personal token (`GITHUB_TOKEN`) works too but hits a lower rate limit and doesn't support webhook mode.
+---
 
 ## Webhook mode
 
-Webhook mode reviews PRs instantly on open/push instead of on a timer.
+Webhook mode gives you instant reviews on PR open/push instead of polling on a timer.
 
-1. Set `WEBHOOK_SECRET` to a random string (`openssl rand -hex 32`)
+1. Set `WEBHOOK_SECRET` to a random string — `openssl rand -hex 32`
 2. Expose the bot publicly (reverse proxy, ngrok, etc.)
 3. Point your GitHub App webhook at `https://yourdomain/webhook`
-4. LocalOwl listens on `WEBHOOK_PORT` (default 8090)
 
-In webhook mode, `GITHUB_REPO` is optional — the bot reviews any repo where the GitHub App is installed.
+In webhook mode, `GITHUB_REPO` is optional — the bot reviews any repo the app is installed on.
+
+---
 
 ## Comment commands
 
-In any PR comment, tag the bot to trigger a command:
+Reply to any PR comment to trigger a command:
 
 | Command | What it does |
 |---|---|
-| `@diffowlbot review` | Run a full review on the current PR state |
+| `@diffowlbot review` | Full review of the current PR state |
 | `@diffowlbot explain` | Plain-language explanation of what the PR does |
-| `@diffowlbot summarize` | 3–5 bullet point summary of key changes |
+| `@diffowlbot summarize` | 3–5 bullet summary of key changes |
+
+> If you renamed the bot, set `BOT_HANDLE` in `.env` to match.
+
+---
 
 ## Models
 
-Anything running in LM Studio works. Recommendations:
+Anything that runs in LM Studio works. A few that are known good:
 
-| Model | RAM | Context | Notes |
-|---|---|---|---|
-| Liquid LFM2.5-1.2B | 1.5 GB | 128K | Recommended — fast, low RAM |
-| IBM Granite 4 Tiny | 3 GB | 128K | Good quality, still lightweight |
-| Mistral 7B | 5 GB | 32K | Strong reviews, needs more RAM |
+| Model | RAM | Notes |
+|---|---|---|
+| Liquid LFM2.5-1.2B | ~1.5 GB | Fast, low footprint — good starting point |
+| IBM Granite 4 Tiny | ~3 GB | Better quality, still lightweight |
+| Mistral 7B | ~5 GB | Strong reviews, needs more RAM |
+
+---
 
 ## Config
 
-All options are in `.env.example`. The main ones:
+All options are in `.env.example`. Key ones:
 
 | Variable | Default | What it does |
 |---|---|---|
-| `POLL_INTERVAL` | `300` | Seconds between checks (polling mode) |
-| `SKIP_DRAFT_PRS` | `true` | Ignore draft PRs |
-| `RECHECK_UPDATED_PRS` | `true` | Re-review when new commits are pushed |
-| `MAX_DIFF_CHARS` | `400000` | Max diff size sent to the model |
-| `IGNORE_FILE_PATTERNS` | `*.lock,...` | Files to skip in diffs |
-| `IGNORE_REPOS` | _(empty)_ | Comma-separated repos to skip entirely |
-| `AUTO_APPROVE` | `false` | Submit formal APPROVE/REQUEST\_CHANGES reviews by verdict; off = always COMMENT |
+| `POLL_INTERVAL` | `300` | Seconds between checks (polling mode only) |
+| `SKIP_DRAFT_PRS` | `true` | Skip draft PRs |
+| `RECHECK_UPDATED_PRS` | `true` | Re-review on new commits |
+| `IGNORE_REPOS` | — | Comma-separated repos to never review |
+| `AUTO_APPROVE` | `false` | Submit formal APPROVE / REQUEST_CHANGES reviews |
+| `BOT_HANDLE` | `diffowlbot` | The bot's GitHub username, used for command parsing |
 
-## Formal reviews
+### `AUTO_APPROVE=true`
 
-When `AUTO_APPROVE=true`, LocalOwl submits a formal GitHub review (visible in the PR review timeline) with the appropriate event:
+When enabled, LocalOwl submits a proper GitHub review instead of a plain comment:
 
-- **✅ Approve** verdict → `APPROVE`
-- **❌ Request changes** verdict → `REQUEST_CHANGES`
+- **✅ Approve** → `APPROVE`
+- **❌ Request changes** → `REQUEST_CHANGES`
 - **⚠️ Approve with suggestions** → `COMMENT`
 
-This lets you use LocalOwl as a required reviewer in branch protection rules. With `AUTO_APPROVE=false` (default), all reviews are posted as `COMMENT` events and never block merges.
+This lets you add the bot as a required reviewer in branch protection rules.
+
+---
 
 ## Per-repo config
 
-Add a `.localowl.yml` to a repo root to customise the review style for that repo:
+Drop a `.localowl.yml` in the root of any repo to customise how it gets reviewed:
 
 ```yaml
-tone: technical     # technical | strict | balanced | lenient
-style: concise      # detailed | concise
-focus:              # any subset of the list below
+tone: technical        # technical | strict | balanced | lenient
+style: concise         # detailed | concise
+focus:
   - bugs
   - security
   - performance
@@ -122,6 +135,8 @@ ignore_patterns:
   - "*.generated.ts"
 custom_instructions: "Always check for missing database indexes."
 ```
+
+---
 
 ## License
 
