@@ -1,8 +1,12 @@
 import fnmatch
 import logging
+
 from .api_gateway import LMStudioClient
 from .config import (
-    MAX_DIFF_CHARS, MAX_FILES_IN_DIFF, MAX_LINES_PER_FILE, IGNORE_FILE_PATTERNS,
+    IGNORE_FILE_PATTERNS,
+    MAX_DIFF_CHARS,
+    MAX_FILES_IN_DIFF,
+    MAX_LINES_PER_FILE,
 )
 
 log = logging.getLogger("localowl.review")
@@ -121,36 +125,18 @@ def _tone_rule(tone: str) -> str | None:
     return None  # balanced — no extra tone rule
 
 
-def _build_incremental_prompt(config: dict | None = None) -> str:
-    cfg   = config or {}
-    tone  = cfg.get("tone", "technical")
-    parts = [
-        _BASE_RULES,
-        "This PR was already reviewed once. Now review ONLY the new commits since then. "
-        "Do not repeat old findings unless the new code makes them worse.",
-    ]
-    tr = _tone_rule(tone)
-    if tr:
-        parts.append(tr)
-    return "\n\n".join(parts) + "\n\nWrite your review using exactly these sections:\n\n---\n\n" + _INCREMENTAL_SECTIONS + "\n\n---"
+def _extra_prompt_parts(cfg: dict) -> list[str]:
+    """Tone/style/focus modifiers shared by the full and incremental prompts."""
+    parts: list[str] = []
 
-
-def _build_system_prompt(config: dict | None = None) -> str:
-    cfg    = config or {}
-    tone   = cfg.get("tone", "technical")
-    style  = cfg.get("style", "detailed")
-    focus  = set(cfg.get("focus") or list(_ALL_FOCUS))
-    custom = (cfg.get("custom_instructions") or "").strip()
-
-    parts = [_BASE_RULES]
-
-    tr = _tone_rule(tone)
+    tr = _tone_rule(cfg.get("tone", "technical"))
     if tr:
         parts.append(tr)
 
-    if style == "concise":
+    if cfg.get("style") == "concise":
         parts.append("Length: keep each section to 1 to 3 short lines.")
 
+    focus = set(cfg.get("focus") or list(_ALL_FOCUS))
     active_focus = _ALL_FOCUS & focus
     if active_focus and active_focus != _ALL_FOCUS:
         labels = ", ".join(
@@ -160,13 +146,32 @@ def _build_system_prompt(config: dict | None = None) -> str:
             f"Pay the most attention to: {labels}. "
             "Still fill in every section, but keep the others short."
         )
+    return parts
 
+
+def _append_custom_instructions(prompt: str, cfg: dict) -> str:
+    custom = (cfg.get("custom_instructions") or "").strip()
+    if not custom:
+        return prompt
+    return prompt + f"\n\n**Extra instructions from the repo owner (follow these too):** {custom}"
+
+
+def _build_incremental_prompt(config: dict | None = None) -> str:
+    cfg   = config or {}
+    parts = [
+        _BASE_RULES,
+        "This PR was already reviewed once. Now review ONLY the new commits since then. "
+        "Do not repeat old findings unless the new code makes them worse.",
+    ] + _extra_prompt_parts(cfg)
+    prompt = "\n\n".join(parts) + "\n\nWrite your review using exactly these sections:\n\n---\n\n" + _INCREMENTAL_SECTIONS
+    return _append_custom_instructions(prompt, cfg) + "\n\n---"
+
+
+def _build_system_prompt(config: dict | None = None) -> str:
+    cfg   = config or {}
+    parts = [_BASE_RULES] + _extra_prompt_parts(cfg)
     prompt = "\n\n".join(parts) + "\n\nWrite your review using exactly these sections:\n\n---\n\n" + _SECTIONS
-
-    if custom:
-        prompt += f"\n\n**Extra instructions from the repo owner (follow these too):** {custom}"
-
-    return prompt + "\n\n---"
+    return _append_custom_instructions(prompt, cfg) + "\n\n---"
 
 
 def _extra_ignore_patterns(config: dict | None) -> list[str]:
@@ -192,6 +197,9 @@ class ReviewEngine:
             extra = _extra_ignore_patterns(repo_config)
             if incremental:
                 diff, truncated = self._extract_incremental_diff(pull_request, since_sha, extra_patterns=extra)
+                if not diff.strip():
+                    log.info("PR #%d: no file changes since last review — nothing to do", pr_number)
+                    return self._no_changes_result(pr_number, pr_title)
                 prompt = _build_incremental_prompt(repo_config)
             else:
                 diff, truncated = self._extract_diff(pull_request, extra_patterns=extra)
@@ -320,14 +328,16 @@ class ReviewEngine:
                 if len(lines) > MAX_LINES_PER_FILE:
                     patch = "\n".join(lines[:MAX_LINES_PER_FILE])
                     patch += f"\n… ({len(lines) - MAX_LINES_PER_FILE} more lines)"
-            section      = f"{header}\n{patch}" if patch else header
-            total_chars += len(section)
+            section = f"{header}\n{patch}" if patch else header
 
-            if total_chars > MAX_DIFF_CHARS:
+            # Always keep the first file even if it alone blows the limit —
+            # otherwise a single huge file would make the diff come back empty.
+            if total_chars + len(section) > MAX_DIFF_CHARS and sections:
                 truncated = True
                 sections.append("… (remaining files omitted — diff size limit reached)")
                 break
 
+            total_chars += len(section)
             sections.append(section)
 
         if len(reviewable) > MAX_FILES_IN_DIFF:
@@ -362,6 +372,16 @@ class ReviewEngine:
             pull_request.title, pull_request.body or "", diff, False, meta
         )
         return self.lm.chat(system, user_msg) or "Could not generate summary."
+
+    @staticmethod
+    def _no_changes_result(pr_number: int, pr_title: str) -> dict:
+        return {
+            "pr_number": pr_number,
+            "pr_title":  pr_title,
+            "review":    "",
+            "status":    "no_changes",
+            "truncated": False,
+        }
 
     @staticmethod
     def _error_result(pr_number: int, pr_title: str, reason: str) -> dict:

@@ -1,0 +1,20 @@
+services:
+  localowl:
+    build: .
+    image: localowl:latest
+    container_name: localowl
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # LM Studio usually runs on the host machine, not inside this container.
+      # host.docker.internal resolves to the host on Docker Desktop (Win/macOS)
+      # and via extra_hosts below on Linux.
+      - LM_STUDIO_BASE_URL=${LM_STUDIO_BASE_URL:-http://host.docker.internal:1234/v1}
+    volumes:
+      # persist review state + logs outside the container
+      - ./data:/app/data
+      # bind-mount your GitHub App private key (optional, only for App auth):
+      # - ./your-app.pem:/app/your-app.pem:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

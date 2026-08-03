@@ -5,12 +5,17 @@ import logging
 import re
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from .config import IGNORE_REPOS, BOT_HANDLE
+
+from .config import BOT_HANDLE, IGNORE_REPOS
 
 log = logging.getLogger("localowl.webhook")
 
 _HANDLED_ACTIONS = frozenset({"opened", "synchronize", "ready_for_review"})
 _BOT_COMMANDS    = frozenset({"review", "explain", "summarize"})
+
+# GitHub webhook payloads stay well under a few MB; anything larger is either
+# a bug or an abuse attempt and gets rejected before we read it into memory.
+_MAX_BODY_BYTES = 5 * 1024 * 1024
 
 
 def _parse_bot_command(body: str) -> str | None:
@@ -21,14 +26,33 @@ def _parse_bot_command(body: str) -> str | None:
 
 
 class _Handler(BaseHTTPRequestHandler):
+    def _drain_body(self, length: int, cap: int) -> None:
+        """Read-and-discard a rejected request body so the connection closes
+        with a clean FIN instead of a reset (avoids client-side aborts)."""
+        remaining = min(length, cap)
+        chunk = 64 * 1024
+        while remaining > 0:
+            data = self.rfile.read(min(remaining, chunk))
+            if not data:
+                break
+            remaining -= len(data)
+
     def do_POST(self):
+        length = int(self.headers.get("Content-Length", 0) or 0)
+        if length < 0 or length > _MAX_BODY_BYTES:
+            if length > 0:
+                self._drain_body(length, _MAX_BODY_BYTES + 64 * 1024)
+            self.send_response(413)
+            self.end_headers()
+            return
+        body = self.rfile.read(length)
+
         if self.path != "/webhook":
+            # drain the request body before responding so the client's write
+            # completes cleanly (avoids connection aborts on some platforms)
             self.send_response(404)
             self.end_headers()
             return
-
-        length = int(self.headers.get("Content-Length", 0))
-        body   = self.rfile.read(length)
 
         # constant-time comparison prevents timing oracle on the secret
         sig      = self.headers.get("X-Hub-Signature-256", "")
@@ -83,7 +107,7 @@ class _Handler(BaseHTTPRequestHandler):
                     return
                 repo      = payload["repository"]["full_name"]
                 pr_number = issue["number"]
-                log.info("Webhook: @diffowlbot %s — %s PR #%d", command, repo, pr_number)
+                log.info("Webhook: @%s %s — %s PR #%d", BOT_HANDLE, command, repo, pr_number)
                 threading.Thread(
                     target=self.server.comment_callback,
                     args=(repo, pr_number, command),

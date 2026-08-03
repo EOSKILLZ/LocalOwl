@@ -1,13 +1,19 @@
 import sys
-from src.config import (
-    setup_logging, validate_config,
-    GITHUB_REPOS, POLL_INTERVAL, SKIP_DRAFT_PRS,
-    WEBHOOK_SECRET, WEBHOOK_PORT,
-)
+
 from src.api_gateway import GitHubClient
+from src.commenter import PRCommenter
+from src.config import (
+    BOT_HANDLE,
+    GITHUB_REPOS,
+    POLL_INTERVAL,
+    SKIP_DRAFT_PRS,
+    WEBHOOK_PORT,
+    WEBHOOK_SECRET,
+    setup_logging,
+    validate_config,
+)
 from src.pr_monitor import PullRequestMonitor
 from src.review_engine import ReviewEngine
-from src.commenter import PRCommenter
 
 log = setup_logging()
 
@@ -20,19 +26,20 @@ class LocalOwl:
         self.review_engine = ReviewEngine()
         self.commenter     = PRCommenter(github_client=shared_gh)
 
-    def process_pull_request(self, repo: str, pull_request, since_sha: str | None = None):
+    def process_pull_request(self, repo: str, pull_request, since_sha: str | None = None) -> dict:
         log.info("[%s] Processing PR #%d: %s", repo, pull_request.number, pull_request.title)
         repo_config = self.monitor.github.get_repo_config(repo)
         if repo_config:
             log.info(
                 "[%s] .localowl.yml: tone=%s style=%s focus=%s",
                 repo,
-                repo_config.get("tone", "balanced"),
+                repo_config.get("tone", "technical"),
                 repo_config.get("style", "detailed"),
                 ",".join(repo_config.get("focus") or []) or "all",
             )
         result = self.review_engine.analyze_pr(pull_request, repo_config=repo_config, since_sha=since_sha)
-        if result["status"] == "success":
+        status = result.get("status")
+        if status == "success":
             posted = self.commenter.post_review_comment(
                 repo, pull_request.number, pull_request.title,
                 result["review"], pr_meta=result.get("meta"),
@@ -42,14 +49,17 @@ class LocalOwl:
                 log.info("[%s] PR #%d — review posted", repo, pull_request.number)
             else:
                 log.error("[%s] PR #%d — review generated but failed to post", repo, pull_request.number)
+        elif status == "no_changes":
+            log.info("[%s] PR #%d — no new changes since last review", repo, pull_request.number)
         else:
             log.error("[%s] PR #%d — review failed: %s", repo, pull_request.number, result["review"])
+        return result
 
     def handle_comment_command(self, repo: str, pr_number: int, command: str):
         pr = self.monitor.github.get_pull_request(repo, pr_number)
         if pr is None:
             return
-        log.info("[%s] @diffowlbot %s — PR #%d", repo, command, pr_number)
+        log.info("[%s] @%s %s — PR #%d", repo, BOT_HANDLE, command, pr_number)
         if command == "review":
             self.process_pull_request(repo, pr)
             self.monitor._mark_processed(repo, pr_number, pr.head.sha)
@@ -72,9 +82,10 @@ class LocalOwl:
         pr = self.monitor.github.get_pull_request(repo, pr_number)
         if pr is None:
             return
-        self.process_pull_request(repo, pr, since_sha=prev_sha)
-        self.monitor._mark_processed(repo, pr_number, head_sha)
-        self.monitor._save_state()
+        result = self.process_pull_request(repo, pr, since_sha=prev_sha)
+        if result is None or result.get("status") in ("success", "no_changes"):
+            self.monitor._mark_processed(repo, pr_number, head_sha)
+            self.monitor._save_state()
 
     def start(self):
         log.info("=" * 55)

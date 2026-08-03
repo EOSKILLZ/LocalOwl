@@ -1,6 +1,7 @@
-import os
 import logging
+import os
 import sys
+
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -17,7 +18,7 @@ def setup_logging(level: str = None) -> logging.Logger:
 
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(logging.Formatter(fmt, datefmt))
-    file_handler = logging.FileHandler("localowl.log")
+    file_handler = logging.FileHandler(os.getenv("LOG_FILE", "localowl.log"))
     file_handler.setFormatter(logging.Formatter(fmt, datefmt))
 
     root.setLevel(log_level)
@@ -68,12 +69,7 @@ GITHUB_APP_PRIVATE_KEY = _load_app_private_key()
 BOT_HANDLE   = os.getenv("BOT_HANDLE", "diffowlbot")
 STATS_URL    = os.getenv("STATS_URL", "")
 AUTO_APPROVE = os.getenv("AUTO_APPROVE", "false").lower() == "true"
-
-def _parse_ignore_repos() -> frozenset[str]:
-    raw = os.getenv("IGNORE_REPOS", "")
-    return frozenset(r.strip() for r in raw.split(",") if r.strip())
-
-IGNORE_REPOS: frozenset[str] = _parse_ignore_repos()
+REPO_URL     = os.getenv("REPO_URL", "https://github.com/EOSKILLZ/LocalOwl")
 
 POLL_INTERVAL  = int(os.getenv("POLL_INTERVAL", "300"))
 STATE_FILE     = os.getenv("STATE_FILE", ".processed_prs.json")

@@ -1,11 +1,12 @@
 import json
 import logging
 import os
+import threading
 import time
 from pathlib import Path
+
 from .api_gateway import GitHubClient
-from .config import GITHUB_REPOS, POLL_INTERVAL, STATE_FILE, SKIP_DRAFT_PRS, RECHECK_UPDATED_PRS
-from . import database as db
+from .config import GITHUB_REPOS, POLL_INTERVAL, RECHECK_UPDATED_PRS, SKIP_DRAFT_PRS, STATE_FILE
 
 log = logging.getLogger("localowl.monitor")
 
@@ -24,6 +25,9 @@ class PullRequestMonitor:
         self.poll_interval = poll_interval
         self.github        = github_client or GitHubClient()
         self._state_path   = Path(STATE_FILE)
+        # guards the in-memory state + state file against concurrent webhook
+        # deliveries mutating and writing it at the same time
+        self._state_lock   = threading.Lock()
         self._state: dict[str, dict[str, str]] = self._load_state()
 
     def start_monitoring(self, callback):
@@ -35,12 +39,10 @@ class PullRequestMonitor:
         try:
             while True:
                 cycle += 1
-                # Merge config repos + user-monitored repos from DB each cycle
-                db_repos = db.get_all_monitored_repos()
-                repos    = list(dict.fromkeys(base_repos + db_repos))
+                repos = base_repos
 
                 if not repos:
-                    log.warning("No repos to monitor — add via dashboard or set GITHUB_REPO")
+                    log.warning("No repos to monitor — set GITHUB_REPO in .env")
                     time.sleep(self.poll_interval)
                     continue
 
@@ -54,12 +56,17 @@ class PullRequestMonitor:
                     for pr, reason in prs:
                         log.info("[%s] %s PR #%d: %s", repo, reason, pr.number, pr.title)
                         try:
-                            callback(repo, pr)
+                            result = callback(repo, pr)
                         except Exception:
                             log.exception("Callback error for %s PR #%d", repo, pr.number)
-                        self._mark_processed(repo, pr.number, pr.head.sha)
-                        dirty = True
-                        found_total += 1
+                            continue
+                        # Only track as reviewed when the review actually completed
+                        # (or there was nothing new to review). Errors are retried
+                        # on the next cycle instead of being permanently skipped.
+                        if result is None or result.get("status") in ("success", "no_changes"):
+                            self._mark_processed(repo, pr.number, pr.head.sha)
+                            dirty = True
+                            found_total += 1
 
                 if dirty:
                     self._save_state()
@@ -93,7 +100,8 @@ class PullRequestMonitor:
         return actionable
 
     def _mark_processed(self, repo: str, pr_number: int, head_sha: str):
-        self._state.setdefault(repo, {})[str(pr_number)] = head_sha
+        with self._state_lock:
+            self._state.setdefault(repo, {})[str(pr_number)] = head_sha
 
     def _resolve_repos(self) -> list[str]:
         resolved = []
@@ -129,11 +137,13 @@ class PullRequestMonitor:
             return {}
 
     def _save_state(self):
-        # write-then-rename for atomicity — crash-safe on POSIX
-        tmp = self._state_path.with_suffix(".tmp")
-        try:
-            tmp.write_text(json.dumps(self._state, indent=2))
-            os.replace(tmp, self._state_path)
-        except Exception as e:
-            log.warning("Could not save state: %s", e)
-            tmp.unlink(missing_ok=True)
+        # write-then-rename for atomicity — crash-safe on POSIX; the lock also
+        # serialises concurrent webhook threads so no snapshot gets lost
+        with self._state_lock:
+            tmp = self._state_path.with_suffix(".tmp")
+            try:
+                tmp.write_text(json.dumps(self._state, indent=2))
+                os.replace(tmp, self._state_path)
+            except Exception as e:
+                log.warning("Could not save state: %s", e)
+                tmp.unlink(missing_ok=True)

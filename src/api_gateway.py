@@ -1,12 +1,20 @@
 import logging
 import time
+
 import requests
 import yaml
-from github import Github, GithubException, GithubIntegration, Auth
+from github import Auth, Github, GithubException, GithubIntegration
+
 from .config import (
-    LM_STUDIO_BASE_URL, LM_STUDIO_API_KEY, LM_STUDIO_MODEL,
-    LM_STUDIO_MAX_TOKENS, LM_STUDIO_TEMPERATURE,
-    GITHUB_TOKEN, GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY, GITHUB_APP_INSTALLATION_ID,
+    GITHUB_APP_ID,
+    GITHUB_APP_INSTALLATION_ID,
+    GITHUB_APP_PRIVATE_KEY,
+    GITHUB_TOKEN,
+    LM_STUDIO_API_KEY,
+    LM_STUDIO_BASE_URL,
+    LM_STUDIO_MAX_TOKENS,
+    LM_STUDIO_MODEL,
+    LM_STUDIO_TEMPERATURE,
 )
 
 log = logging.getLogger("localowl.api")
@@ -27,6 +35,22 @@ class LMStudioClient:
         self._session.headers.update({"Content-Type": "application/json"})
         if api_key:
             self._session.headers["Authorization"] = f"Bearer {api_key}"
+        # set once when "local" (or a stale model id) is rejected, so we can
+        # fall back to the first model actually loaded in LM Studio
+        self._auto_model_resolved = False
+
+    def _list_chat_models(self) -> list[str]:
+        try:
+            resp = self._session.get(f"{self.base_url}/models", timeout=10)
+            resp.raise_for_status()
+            return [
+                m["id"]
+                for m in resp.json().get("data", [])
+                if "embed" not in str(m.get("id", "")).lower()
+            ]
+        except Exception as e:
+            log.debug("Could not list LM Studio models: %s", e)
+            return []
 
     def chat(
         self,
@@ -58,10 +82,30 @@ class LMStudioClient:
                     body = e.response.text[:300]
                 except Exception:
                     pass
-                last_error = f"HTTP {e.response.status_code}: {body}"
-                log.error("LM Studio HTTP error (attempt %d/%d): %s — %s",
-                          attempt, retries, e.response.status_code, body)
-                break
+                status = e.response.status_code
+                last_error = f"HTTP {status}: {body}"
+                # The default "local" alias (or a stale model id) is rejected by
+                # LM Studio — auto-switch to the first model actually loaded so
+                # first-time setup works without hunting for the exact id.
+                if status == 400 and not self._auto_model_resolved and payload["model"] == self.model:
+                    models = self._list_chat_models()
+                    if models:
+                        self._auto_model_resolved = True
+                        payload["model"] = models[0]
+                        log.warning(
+                            "Model '%s' was rejected — using loaded model '%s' instead. "
+                            "Set LM_STUDIO_MODEL=%s in .env to pin it.",
+                            self.model, models[0], models[0],
+                        )
+                        continue
+                # 4xx other than 429 is a permanent error — no point retrying.
+                # 429 and 5xx are transient (LM Studio busy / model still
+                # loading) and are worth a backoff retry.
+                if status < 500 and status != 429:
+                    log.error("LM Studio HTTP error: %s — %s", status, body)
+                    break
+                log.warning("LM Studio HTTP %d (attempt %d/%d): %s",
+                            status, attempt, retries, body)
             except requests.exceptions.Timeout:
                 last_error = "timeout"
                 log.warning("LM Studio timeout (attempt %d/%d)", attempt, retries)
@@ -82,19 +126,12 @@ class LMStudioClient:
         return ""
 
     def health_check(self) -> bool:
-        try:
-            resp = self._session.get(f"{self.base_url}/models", timeout=5)
-            resp.raise_for_status()
-            models = resp.json().get("data", [])
-            chat_models = [m["id"] for m in models if "embed" not in m["id"].lower()]
-            if chat_models:
-                log.info("LM Studio loaded model(s): %s", ", ".join(chat_models))
-                return True
-            log.warning("LM Studio reachable but no chat models loaded")
-            return False
-        except Exception as e:
-            log.error("LM Studio health check failed: %s", e)
-            return False
+        chat_models = self._list_chat_models()
+        if chat_models:
+            log.info("LM Studio loaded model(s): %s", ", ".join(chat_models))
+            return True
+        log.warning("LM Studio unreachable or no chat models loaded")
+        return False
 
 
 class GitHubClient:

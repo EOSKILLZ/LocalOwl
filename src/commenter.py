@@ -1,12 +1,18 @@
 import hashlib
 import logging
 import threading
-import requests
 from datetime import datetime, timezone
-from .api_gateway import GitHubClient
+
+import requests
+
 from . import config
+from .api_gateway import GitHubClient
 
 log = logging.getLogger("localowl.commenter")
+
+# GitHub rejects comments/reviews longer than this; leave headroom for the
+# header and footer so the model output can never blow the whole comment.
+_MAX_BODY_CHARS = 55_000
 
 _VERDICT_LABELS = {
     "approve":     ("✅", "Approved"),
@@ -141,15 +147,7 @@ class PRCommenter:
         return comment_id is not None
 
     def _should_auto_approve(self) -> bool:
-        if config.AUTO_APPROVE:
-            return True
-        try:
-            from . import database as db
-            return bool(db.get_settings().get("auto_approve", False))
-        except ImportError:
-            return False
-        except Exception:
-            return False
+        return config.AUTO_APPROVE
 
     def _format_comment(
         self,
@@ -182,6 +180,12 @@ class PRCommenter:
         review_body = (review_text or "").strip()
         if not review_body or review_body.lower() in ("none", "n/a"):
             review_body = "> No issues found — looks good! ✅"
+
+        if len(review_body) > _MAX_BODY_CHARS:
+            review_body = review_body[:_MAX_BODY_CHARS].rstrip() + (
+                "\n\n> ⚠️ Review was truncated by LocalOwl — the full model "
+                "output was longer than GitHub allows in one comment."
+            )
 
         issue_sections = _extract_issue_sections(review_body)
         fix_prompt = _generate_fix_prompt(pr_title, issue_sections)
@@ -219,7 +223,7 @@ class PRCommenter:
             "unknown":     "🔍 **Review complete — see sections above for details.**",
         }
 
-        repo_url = "https://github.com/EOSKILLZ/LocalOwl"
+        repo_url = config.REPO_URL
         bot      = config.BOT_HANDLE
         parts += [
             "",
